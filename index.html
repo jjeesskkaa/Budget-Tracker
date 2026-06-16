@@ -474,10 +474,16 @@ function BudgetTracker() {
 
   async function importAll() {
     setSyncing(true);
-    for (const row of uploadPreview) await saveTxn(row);
+    const batchSize = 20;
+    const total = uploadPreview.length;
+    for (let i = 0; i < total; i += batchSize) {
+      const batch = uploadPreview.slice(i, i + batchSize);
+      await Promise.all(batch.map(row => saveTxn(row)));
+      setUploadMsg(`Importing... ${Math.min(i + batchSize, total)} of ${total}`);
+    }
     setSyncing(false);
     setUploadPreview([]);
-    setUploadMsg(`✅ Imported ${uploadPreview.length} transactions!`);
+    setUploadMsg(`✅ Imported ${total} transactions!`);
     setTab(0);
   }
 
