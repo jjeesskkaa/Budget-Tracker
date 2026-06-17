@@ -814,6 +814,7 @@ function BudgetTracker() {
   const [showCreditsOnly, setShowCreditsOnly] = useState(false);
   const [showUntaggedOnly, setShowUntaggedOnly] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [breakdownSearch, setBreakdownSearch] = useState("");
   const [expandedTxnId, setExpandedTxnId] = useState(null);
   const [bulkTagModal, setBulkTagModal] = useState(null); // { matches, tag, tagLabel, root }
   const [bulkSelected, setBulkSelected] = useState({});
@@ -833,11 +834,12 @@ function BudgetTracker() {
   const withSync = async (fn) => { setSyncing(true); try { await fn(); } finally { setSyncing(false); } };
 
   function filterTxns(list) {
+    let filtered = list;
+    // Keyword search stacks WITH all other filters
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
-      return list.filter(t => t.description.toLowerCase().includes(q) || (t.notes && t.notes.toLowerCase().includes(q)));
+      filtered = filtered.filter(t => t.description.toLowerCase().includes(q) || (t.notes && t.notes.toLowerCase().includes(q)));
     }
-    let filtered = list;
     if (filterAccount !== "all") filtered = filtered.filter(t => t.account === filterAccount);
     if (filterTag !== "all") filtered = filtered.filter(t => t.tag === filterTag || t.tag2 === filterTag);
     if (view === 0) filtered = filtered.filter(t => { const d = new Date(t.date); return d.getMonth() === selMonth && d.getFullYear() === selYear; });
@@ -851,6 +853,9 @@ function BudgetTracker() {
   }
 
   const filtered = filterTxns(allTxns);
+  const breakdownFiltered = breakdownSearch.trim()
+    ? filtered.filter(t => t.description.toLowerCase().includes(breakdownSearch.trim().toLowerCase()) || (t.notes && t.notes.toLowerCase().includes(breakdownSearch.trim().toLowerCase())))
+    : filtered;
 
   function processCSV(text, accountId, existingTxns = []) {
     const parser = autoDetectParser(text);
@@ -968,7 +973,7 @@ function BudgetTracker() {
               <div style={{ marginBottom: 10, position: "relative" }}>
                 <input placeholder="Search transactions... (bypasses all filters)" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} style={{ paddingRight: searchQuery ? 32 : 12, fontSize: 13 }} />
                 {searchQuery && <button onClick={() => setSearchQuery("")} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: p.muted, fontSize: 18, cursor: "pointer" }}>×</button>}
-                {searchQuery && <div style={{ fontSize: 10, color: p.muted, marginTop: 3 }}>Showing all time · all accounts · all tags — keyword match only</div>}
+                {searchQuery && <div style={{ fontSize: 10, color: p.muted, marginTop: 3 }}>Keyword search active — other filters still apply</div>}
               </div>
             )}
             {/* View selector */}
@@ -1065,10 +1070,10 @@ function BudgetTracker() {
                 <div style={{ fontSize: 12, color: p.muted }}>
                   {filtered.length} transactions · {fmt(filtered.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0))} spent
                 </div>
-                {searchQuery.trim() && filtered.length > 0 && (
+                {filtered.length > 0 && (searchQuery.trim() || filterTag !== "all" || filterAccount !== "all") && (
                   <button onClick={() => setSearchBulkModal({ matches: filtered })}
                     style={{ fontSize: 12, padding: "5px 12px", borderRadius: 6, border: `1px solid ${p.accent}`, background: p.accent+"22", color: p.accent, cursor: "pointer", fontWeight: 600, whiteSpace: "nowrap" }}>
-                    Tag all {filtered.length} results
+                    Tag all {filtered.length}
                   </button>
                 )}
               </div>
@@ -1111,7 +1116,29 @@ function BudgetTracker() {
           )}
 
           {/* BREAKDOWN */}
-          {tab === 1 && <Breakdown txns={filtered} />}
+          {tab === 1 && (
+            <div>
+              {/* Breakdown keyword search */}
+              <div style={{ marginBottom: 12, position: "relative" }}>
+                <input
+                  placeholder="Filter breakdown by keyword (e.g. amazon, arco, safeway)..."
+                  value={breakdownSearch}
+                  onChange={e => setBreakdownSearch(e.target.value)}
+                  style={{ fontSize: 13, paddingRight: breakdownSearch ? 32 : 12 }}
+                />
+                {breakdownSearch && (
+                  <button onClick={() => setBreakdownSearch("")}
+                    style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: p.muted, fontSize: 18, cursor: "pointer" }}>×</button>
+                )}
+                {breakdownSearch && (
+                  <div style={{ fontSize: 10, color: p.muted, marginTop: 3 }}>
+                    Showing {breakdownFiltered.length} transactions matching "{breakdownSearch}" — date/account/tag filters still apply
+                  </div>
+                )}
+              </div>
+              <Breakdown txns={breakdownFiltered} />
+            </div>
+          )}
 
           {/* ADD CASH */}
           {tab === 2 && (
