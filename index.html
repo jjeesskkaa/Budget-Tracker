@@ -1270,6 +1270,7 @@ function BudgetTracker() {
                       const cashIds = cashTxns.filter(t => t.account === acc.id).map(t => String(t.id));
                       if (mainIds.length) await db.bulkDelete("transactions", mainIds);
                       if (cashIds.length) await db.bulkDelete("cash_transactions", cashIds);
+                      await new Promise(r => setTimeout(r, 500));
                       await reloadTxns();
                       await reloadCash();
                       setSyncing(false);
@@ -1289,6 +1290,7 @@ function BudgetTracker() {
                   setSyncing(true);
                   await db.deleteAll("transactions");
                   await db.deleteAll("cash_transactions");
+                  await new Promise(r => setTimeout(r, 500));
                   await reloadTxns();
                   await reloadCash();
                   setSyncing(false);
@@ -1323,6 +1325,7 @@ function BudgetTracker() {
                       if (!window.confirm(`Permanently delete all ${trashTxns.length} trashed transactions? This cannot be undone.`)) return;
                       setSyncing(true);
                       await db.deleteAll("trash_transactions");
+                      await new Promise(r => setTimeout(r, 400));
                       await reloadTrash();
                       setSyncing(false);
                     }} style={{ fontSize: 12, padding: "4px 12px", borderRadius: 6, border: `1px solid ${p.red}`, background: p.red+"22", color: p.red, cursor: "pointer" }}>
@@ -1355,6 +1358,7 @@ function BudgetTracker() {
                             if (!window.confirm("Permanently delete this transaction?")) return;
                             setSyncing(true);
                             await deleteFromTrash(t.id);
+                            await new Promise(r => setTimeout(r, 300));
                             setSyncing(false);
                           }} style={{ fontSize: 11, padding: "3px 8px", borderRadius: 5, border: `1px solid ${p.red}44`, background: "none", color: p.red, cursor: "pointer" }}>
                             Delete
