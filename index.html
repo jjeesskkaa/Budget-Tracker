@@ -1,1421 +1,974 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="Budget Tracker" />
-  <meta name="theme-color" content="#0f1117" />
-  <title>Budget Tracker</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
-  <style>* { box-sizing: border-box; margin: 0; padding: 0; } body { background: #0f1117; }</style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
 </head>
 <body>
-  <div id="root"></div>
-  <script type="text/babel">
-const { useState, useEffect, useCallback } = React;
-
-// ── Supabase ──────────────────────────────────────────────────────────────────
-const SUPA_URL = "https://fiynbzobclqrilkmduft.supabase.co";
-const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZpeW5iem9iY2xxcmlsa21kdWZ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2Mzg4NjcsImV4cCI6MjA5NzIxNDg2N30.JGvJvuZ7hxLrLyDtZokBa0cDaeu28EPFwW0YfovMdvs";
-
-const db = {
-  async get(table) {
-    const r = await fetch(`${SUPA_URL}/rest/v1/${table}?select=*`, {
-      headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` }
-    });
-    const rows = await r.json();
-    if (!Array.isArray(rows)) return [];
-    return rows.map(r => r.data);
-  },
-  async upsert(table, id, data) {
-    await fetch(`${SUPA_URL}/rest/v1/${table}`, {
-      method: "POST",
-      headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates" },
-      body: JSON.stringify({ id: String(id), data })
-    });
-  },
-  async bulkUpsert(table, items) {
-    const rows = items.map(item => ({ id: String(item.id), data: item }));
-    const batchSize = 50;
-    for (let i = 0; i < rows.length; i += batchSize) {
-      const batch = rows.slice(i, i + batchSize);
-      await fetch(`${SUPA_URL}/rest/v1/${table}`, {
-        method: "POST",
-        headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates" },
-        body: JSON.stringify(batch)
-      });
-    }
-  },
-  async delete(table, id) {
-    await fetch(`${SUPA_URL}/rest/v1/${table}?id=eq.${id}`, {
-      method: "DELETE",
-      headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` }
-    });
-  },
-  async bulkDelete(table, ids) {
-    if (!ids.length) return;
-    // Delete in batches of 100 using Supabase IN filter
-    const batchSize = 100;
-    for (let i = 0; i < ids.length; i += batchSize) {
-      const batch = ids.slice(i, i + batchSize);
-      const inClause = batch.map(id => `"${id}"`).join(",");
-      await fetch(`${SUPA_URL}/rest/v1/${table}?id=in.(${batch.join(",")})`, {
-        method: "DELETE",
-        headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` }
-      });
-    }
-  },
-  async deleteAll(table) {
-    // Delete all rows in one shot
-    await fetch(`${SUPA_URL}/rest/v1/${table}?id=neq.____never____`, {
-      method: "DELETE",
-      headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` }
-    });
-  }
-};
-
-// ── Constants ─────────────────────────────────────────────────────────────────
-const ACCOUNTS = [
-  { id: "jessica_chase", name: "Jessica — Southwest Chase", color: "#6c63ff" },
-  { id: "husband_capital", name: "Husband — Capital One Savor", color: "#e67e22" },
-  { id: "alliant", name: "Alliant — Bills", color: "#27ae60" },
-  { id: "cash", name: "Cash", color: "#95a5a6" },
-];
-
-
-const SKIP_KEYWORDS = ["payment thank you", "payment - thank you", "autopay payment", "online payment", "mobile payment", "thank you payment"];
-
-// Extract core merchant root for fuzzy matching
-// Prefixes to skip — use the word AFTER these
-const MERCHANT_SKIP_PREFIXES = ["SQ", "SP", "TM", "TST", "DLR"];
-
-function cleanMerchant(desc) {
-  let d = desc.toUpperCase().trim();
-  // Remove known prefix patterns at START (SQ*, SP*, TST*, etc.)
-  d = d.replace(/^(SQ|SP|TM|TST|DLR)\s*\*?\s*/, "");
-  // Remove #number suffixes
-  d = d.replace(/#[\w\d]*/g, "");
-  // Remove *alphanumeric suffixes
-  d = d.replace(/\*[\w\d]+/g, "");
-  d = d.trim().replace(/^[\s.*\-\/]+/, "").replace(/[\s.*\-\/]+$/, "");
-  // Split on spaces/dots/slashes but preserve hyphens
-  const words = d.split(/[\s.*/]+/).map(w => w.replace(/^['.,]+|['.,]+$/g, "")).filter(w => w && !/^\d+$/.test(w));
-  if (!words.length) return desc.slice(0, 6).toUpperCase();
-  const first = words[0];
-  const second = words[1] || "";
-  if (first === "SONORA" && second) return "SONORA " + second.slice(0, 4);
-  return first;
+<title>Day by Day</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Atkinson+Hyperlegible:wght@400;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a month calendar heat-shaded by daily spend, with the tapped day's receipt beside it (stacked on phones). */
+:root {
+  --bg: #f3f4f1; --surface: #ffffff; --cell: #eceee9; --line: #d9ddd4;
+  --fg: #1d221f; --muted: #6a726b; --faint: #a3aaa2;
+  --heat: #c9781c; --accent: #2f6b5a; --accent-fg: #ffffff;
+  --refund: #2f7d4f; --warn: #a3412c;
+  --k1: #3a62b8; --k2: #b8562f; --k3: #2f7d4f; --k4: #8a5bb0; --k5: #a17d0e; --k6: #1f8080; --k7: #b53a6e; --k8: #5d6b2a;
+  --c-cash: #7b7f78; --c-other: #a3412c;
+  --display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
+  --body: "Atkinson Hyperlegible", system-ui, -apple-system, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
 }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121614; --surface: #1a1f1c; --cell: #212724; --line: #2e3631;
+  --fg: #e6ebe6; --muted: #98a299; --faint: #5f6962;
+  --heat: #e39a3c; --accent: #7cc4ad; --accent-fg: #0e1a15;
+  --refund: #6fca95; --warn: #e88a72;
+  --k1: #7d9ef0; --k2: #ec8d64; --k3: #6fca95; --k4: #c39be6; --k5: #e2c25a; --k6: #5fcfcf; --k7: #ef8ab4; --k8: #b4c46c;
+  --c-cash: #a4a9a2; --c-other: #e88a72;
+  color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #121614; --surface: #1a1f1c; --cell: #212724; --line: #2e3631;
+  --fg: #e6ebe6; --muted: #98a299; --faint: #5f6962;
+  --heat: #e39a3c; --accent: #7cc4ad; --accent-fg: #0e1a15;
+  --refund: #6fca95; --warn: #e88a72;
+  --k1: #7d9ef0; --k2: #ec8d64; --k3: #6fca95; --k4: #c39be6; --k5: #e2c25a; --k6: #5fcfcf; --k7: #ef8ab4; --k8: #b4c46c;
+  --c-cash: #a4a9a2; --c-other: #e88a72;
+  color-scheme: dark }
 
-// Match two descriptions using merchant root - one or both roots must contain the other
-function merchantMatch(descA, descB) {
-  const a = cleanMerchant(descA);
-  const b = cleanMerchant(descB);
-  return a === b || a.includes(b) || b.includes(a);
-}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 15px; line-height: 1.45; }
+.wrap { max-width: 1080px; margin: 0 auto; padding-block: 20px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 18px; }
+button, input, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.label { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 700; }
 
+header.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+h1 { font-family: var(--display); font-weight: 700; font-size: 26px; margin: 0; letter-spacing: -.01em; }
+.monthnav { display: flex; align-items: center; gap: 4px; }
+.monthnav h2 { font-family: var(--display); font-weight: 500; font-size: 20px; margin: 0; min-width: 9.5ch; text-align: center; }
+.iconbtn { width: 36px; height: 36px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); display: grid; place-items: center; font-size: 18px; line-height: 1; }
 
-// Auto-tag by merchant keyword → tag id
-const TAGS = [
-  { id: "untagged",       label: "Untagged",                color: "#4a4f6a", bg: "#141414" },
-  { id: "entertainment",  label: "Entertainment / Day Trip", color: "#e91e8c", bg: "#2a0a1a" },
-  { id: "grocery",        label: "Grocery",                  color: "#27ae60", bg: "#0a1a0e" },
-  { id: "dining",         label: "Dining",                   color: "#e67e22", bg: "#1a0f00" },
-  { id: "merchandise",    label: "Merchandise",              color: "#3498db", bg: "#0a1020" },
-  { id: "health",         label: "Health",                   color: "#1abc9c", bg: "#0a1a16" },
-  { id: "other",          label: "Other",                    color: "#7f8c8d", bg: "#141414" },
-  { id: "other_services", label: "Other Services",           color: "#95a5a6", bg: "#141618" },
-  { id: "home",           label: "Home",                     color: "#d35400", bg: "#1a0e00" },
-  { id: "streaming",      label: "Streaming Subscriptions",  color: "#8e44ad", bg: "#180a20" },
-  { id: "insurance",      label: "Insurance",                color: "#2980b9", bg: "#0a1420" },
-  { id: "pure_ryan",      label: "Pure Ryan",                color: "#00bcd4", bg: "#001a1e" },
-  { id: "pure_jess",      label: "Pure Jess",                color: "#f06292", bg: "#1e0010" },
-  { id: "phone",          label: "Phone",                    color: "#9c27b0", bg: "#160a1a" },
-  { id: "gas",            label: "Gas / Automotive",         color: "#ff9800", bg: "#1a1000" },
-  { id: "mortgage",       label: "Mortgage",                 color: "#607d8b", bg: "#0e1214" },
-  { id: "student_loans",  label: "Student Loans",            color: "#795548", bg: "#14100e" },
-  { id: "income",         label: "Income",                   color: "#2ecc71", bg: "#0a1a10" },
-  { id: "credit_refund",  label: "Credit / Refund",          color: "#16a085", bg: "#0a1a16" },
-  { id: "medical",              label: "Medical",                   color: "#e74c3c", bg: "#1a0808" },
-  { id: "garden",               label: "Garden",                    color: "#5d9c3a", bg: "#0d1a08" },
-  { id: "subscriptions",        label: "Subscriptions",             color: "#7d3c98", bg: "#160a1e" },
-  { id: "atlas",                label: "Atlas",                     color: "#f1c40f", bg: "#1a1600" },
-  { id: "golf",                 label: "Golf",                      color: "#27ae60", bg: "#081a08" },
-  { id: "mila",                 label: "Mila",                      color: "#fd79a8", bg: "#1a0814" },
-  { id: "doomsday",             label: "DoomsDay",                  color: "#c0392b", bg: "#1a0808" },
-  { id: "hotels",               label: "Hotels",                    color: "#2c3e50", bg: "#0a0e12" },
-  { id: "rentals",              label: "Rentals",                   color: "#8e44ad", bg: "#140a18" },
-  { id: "trips",                label: "Trips",                     color: "#16a085", bg: "#081614" },
-  { id: "flag",                 label: "FLAG",                      color: "#e74c3c", bg: "#2a0808" },
-  { id: "sp",                   label: "SP",                        color: "#a29bfe", bg: "#1a1830" },
-];
+.banner { background: color-mix(in oklab, var(--heat) 14%, var(--surface)); border: 1px solid color-mix(in oklab, var(--heat) 40%, var(--line)); border-radius: 10px; padding: 10px 14px; font-size: 14px; }
 
-const VIEWS = ["📅 Month", "📆 Year", "🗓 Custom", "⏱ All Time"];
-const TABS = ["Transactions", "Breakdown", "Add Cash", "Upload", "Manage"];
+.summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.summary > div { background: var(--surface); padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.summary .big { font-family: var(--display); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.summary .sub { font-size: 12.5px; color: var(--muted); }
+.summary .expected .big { color: var(--muted); }
+@media (max-width: 640px) { .summary > div { padding: 10px; } .summary .big { font-size: 18px; } .summary .label { font-size: 10px; } }
 
-const today = () => new Date().toISOString().split("T")[0];
-const fmt = (n) => "$" + Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const monthName = (m) => ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][m];
+.main { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 820px) { .main { grid-template-columns: minmax(0, 1fr); } }
 
-// ── CSV Parsers ───────────────────────────────────────────────────────────────
-function parseChaseCSV(text) {
-  const lines = text.trim().split("\n").filter(l => l.trim());
-  if (lines.length < 2) return [];
-  const delim = lines[0].includes("\t") ? "\t" : ",";
-  const results = [];
-  for (let i = 1; i < lines.length; i++) {
-    const cols = delim === "\t" ? lines[i].split("\t") : parseCSVLine(lines[i]);
-    if (cols.length < 4) continue;
-    const date = cols[0]?.trim();
-    const desc = cols[2]?.trim() || cols[1]?.trim();
-    const amtRaw = cols[5]?.trim() || cols[4]?.trim() || cols[3]?.trim();
-    if (!date || !desc || !amtRaw) continue;
-    const amount = parseFloat(amtRaw.replace(/[$,]/g, ""));
-    if (isNaN(amount)) continue;
-    results.push({ date, description: desc, amount: -amount });
-  }
-  return results;
-}
+.cal { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+.dow, .grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px; }
+.dow span { font-size: 11px; text-align: center; color: var(--muted); font-weight: 700; letter-spacing: .06em; padding-bottom: 6px; }
+.cell { position: relative; border: 1px solid transparent; border-radius: 8px; background: var(--cell); min-height: 70px; padding: 5px 6px; display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; text-align: left; gap: 2px; }
+.cell.blank { background: transparent; }
+.cell .dn { font-size: 12px; color: var(--muted); font-weight: 700; }
+.cell .amt { font-family: var(--mono); font-size: 13px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.cell.neg .amt { color: var(--refund); }
+.cell .exp { font-family: var(--mono); font-size: 10.5px; color: var(--muted); border: 1px dashed var(--faint); border-radius: 4px; padding: 0 3px; }
+.cell.nodata .dn { color: var(--faint); }
+.cell.today { border-color: var(--fg); }
+.cell.sel { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+.cell:not(.blank):hover { border-color: var(--muted); }
+.legend { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 10px; font-size: 12px; color: var(--muted); }
+.legend .ramp { display: inline-block; width: 70px; height: 10px; border-radius: 3px; background: linear-gradient(90deg, var(--cell), var(--heat)); vertical-align: middle; margin: 0 6px; }
+.legend .dash { display: inline-block; border: 1px dashed var(--faint); border-radius: 3px; padding: 0 4px; font-family: var(--mono); font-size: 10.5px; }
+@media (max-width: 480px) { .cell { min-height: 58px; padding: 4px; } .cell .amt { font-size: 11.5px; } .cell .exp { font-size: 9.5px; } .dow, .grid { gap: 3px; } .cal { padding: 8px; } }
 
-function parseCapitalOneCSV(text) {
-  const lines = text.trim().split("\n").filter(l => l.trim());
-  if (lines.length < 2) return [];
-  const delim = lines[0].includes("\t") ? "\t" : ",";
-  const results = [];
-  for (let i = 1; i < lines.length; i++) {
-    const cols = delim === "\t" ? lines[i].split("\t") : parseCSVLine(lines[i]);
-    if (cols.length < 5) continue;
-    // Tab format: Transaction Date, Posted Date, Card No., Description, Category, Debit, Credit
-    const date = cols[0]?.trim();
-    const desc = cols[3]?.trim() || cols[2]?.trim();
-    const debitRaw = cols[5]?.trim() || "";
-    const creditRaw = cols[6]?.trim() || "";
-    if (!date || !desc) continue;
-    const debit = parseFloat(debitRaw.replace(/[$,]/g, ""));
-    const credit = parseFloat(creditRaw.replace(/[$,]/g, ""));
-    // Debit = money spent (positive amount), Credit = payment/refund (skip or negative)
-    if (!isNaN(debit) && debit > 0) {
-      results.push({ date, description: desc, amount: debit });
-    } else if (!isNaN(credit) && credit > 0) {
-      // Credits are refunds — include as negative (money back)
-      results.push({ date, description: desc, amount: -credit });
-    }
-  }
-  return results;
-}
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.panel h3 { font-family: var(--display); font-size: 19px; font-weight: 700; margin: 0; text-wrap: balance; }
+.dayhead { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; border-bottom: 1px dashed var(--line); padding-bottom: 10px; }
+.dayhead .total { font-family: var(--display); font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.txlist { display: flex; flex-direction: column; }
+.tx { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; column-gap: 10px; row-gap: 6px; padding: 10px 0; border-bottom: 1px solid var(--line); align-items: baseline; }
+.tx:last-child { border-bottom: 0; }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--c); align-self: center; }
+.tx-name { font-weight: 700; overflow-wrap: anywhere; }
+.tx-sub { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.tx-amt { font-family: var(--mono); font-variant-numeric: tabular-nums; font-weight: 500; white-space: nowrap; }
+.tx-amt.neg { color: var(--refund); }
+.tx-act { grid-column: 2 / 4; display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { border: 1px solid var(--line); background: transparent; border-radius: 999px; padding: 3px 10px; font-size: 12.5px; color: var(--muted); }
+.chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.chip:hover { border-color: var(--muted); color: var(--fg); }
+.chip[aria-pressed="true"]:hover { color: var(--accent-fg); }
+.tx.off .tx-name, .tx.off .tx-amt { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--faint); }
+.tx.expected { color: var(--muted); }
+.tx.expected .tx-name { font-weight: 400; font-style: italic; }
+.tx.expected .dot { background: transparent; border: 1px dashed var(--faint); }
+details.sub summary { cursor: pointer; font-size: 13px; color: var(--muted); padding: 6px 0; }
+.empty { color: var(--muted); font-size: 14px; }
+.biglist { display: flex; flex-direction: column; }
+.biglist button { display: flex; justify-content: space-between; gap: 10px; background: none; border: 0; border-bottom: 1px solid var(--line); padding: 9px 0; text-align: left; }
+.biglist button:hover { color: var(--accent); }
+.bar { height: 4px; border-radius: 2px; background: var(--heat); margin-top: 4px; }
 
-function parseAlliantCSV(text) {
-  const lines = text.trim().split("\n").filter(l => l.trim());
-  if (lines.length < 2) return [];
-  // Alliant uses tabs
-  const delim = lines[0].includes("\t") ? "\t" : ",";
-  const results = [];
-  for (let i = 1; i < lines.length; i++) {
-    const cols = delim === "\t" ? lines[i].split("\t") : parseCSVLine(lines[i]);
-    if (cols.length < 3) continue;
-    const date = cols[0]?.trim();
-    const desc = cols[1]?.trim();
-    const amtRaw = cols[2]?.trim();
-    if (!date || !desc || !amtRaw) continue;
-    // Alliant wraps withdrawals in parentheses: ($2,689.30)
-    let amount;
-    if (amtRaw.startsWith("(") && amtRaw.endsWith(")")) {
-      // Withdrawal — positive expense amount
-      amount = parseFloat(amtRaw.slice(1, -1).replace(/[$,]/g, ""));
-    } else {
-      // Deposit — negative (credit/income)
-      amount = -parseFloat(amtRaw.replace(/[$,]/g, ""));
-    }
-    if (isNaN(amount)) continue;
-    results.push({ date, description: desc, amount });
-  }
-  return results;
-}
+form.cash { display: flex; gap: 6px; flex-wrap: wrap; border-top: 1px dashed var(--line); padding-top: 12px; }
+input[type=text], input[type=number], textarea { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; min-width: 0; }
+form.cash #cashAmt { width: 7.5em; }
+form.cash #cashNote { flex: 1 1 8em; }
+.btn { border: 1px solid var(--accent); background: var(--accent); color: var(--accent-fg); border-radius: 8px; padding: 7px 14px; font-weight: 700; }
+.btn.ghost { background: transparent; color: var(--accent); }
+.btn.danger { background: var(--warn); border-color: var(--warn); color: var(--surface); }
 
-function parseCSVLine(line) {
-  const result = [];
-  let cur = "", inQ = false;
-  for (let i = 0; i < line.length; i++) {
-    if (line[i] === '"') { inQ = !inQ; }
-    else if (line[i] === ',' && !inQ) { result.push(cur); cur = ""; }
-    else cur += line[i];
-  }
-  result.push(cur);
-  return result;
-}
+.section { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+.section > summary { list-style: none; cursor: pointer; padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.section > summary::-webkit-details-marker { display: none; }
+.section > summary h3 { font-family: var(--display); font-size: 17px; margin: 0; }
+.section > summary::after { content: "+"; font-size: 20px; color: var(--muted); }
+.section[open] > summary::after { content: "–"; }
+.section .inner { padding: 0 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+.drop { border: 2px dashed var(--line); border-radius: 10px; padding: 22px 16px; text-align: center; display: flex; flex-direction: column; gap: 8px; align-items: center; }
+.drop.over { border-color: var(--accent); background: color-mix(in oklab, var(--accent) 8%, transparent); }
+.drop input { display: none; }
+.files { display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; }
+.files .f { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: center; padding: 8px 10px; background: var(--bg); border-radius: 8px; }
+.files .f.err { color: var(--warn); }
+.help { font-size: 13px; color: var(--muted); }
+.help b { color: var(--fg); }
+.bills { display: flex; flex-direction: column; }
+.bills .b { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+textarea { width: 100%; min-height: 70px; font-family: var(--mono); font-size: 12px; }
+.confirm { background: color-mix(in oklab, var(--warn) 10%, var(--surface)); border: 1px solid var(--warn); border-radius: 8px; padding: 10px 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.note { font-size: 12.5px; color: var(--muted); }
 
-function autoDetectParser(text) {
-  const first = text.split("\n")[0].toLowerCase().trim();
-  // Capital One: has "card no"
-  if (first.includes("card no")) return parseCapitalOneCSV;
-  // Alliant: has "balance" column and amount in parens format, or "withdrawal"
-  if (first.includes("balance") || (first.includes("date") && first.includes("amount") && !first.includes("post"))) return parseAlliantCSV;
-  // Chase: transaction date + post date
-  if (first.includes("transaction date") || first.includes("post date")) return parseChaseCSV;
-  // Capital One fallback
-  if (first.includes("posted date") || first.includes("card num")) return parseCapitalOneCSV;
-  return parseChaseCSV;
-}
+.checks { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.checks-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.checks-head .count { font-family: var(--display); font-weight: 700; font-size: 16px; }
+.checks-head .count.done { color: var(--refund); }
+.chiprow { display: flex; flex-wrap: wrap; gap: 6px; }
+.acct { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line); background: var(--bg); border-radius: 999px; padding: 6px 12px 6px 8px; font-size: 14px; }
+.acct .box { width: 18px; height: 18px; border-radius: 5px; border: 1.5px dashed var(--faint); display: grid; place-items: center; font-size: 12px; font-weight: 700; line-height: 1; flex: none; }
+.acct.in { border-color: var(--c); background: color-mix(in oklab, var(--c) 10%, var(--surface)); }
+.acct.in .box { background: var(--c); border: 1.5px solid var(--c); color: var(--surface); }
+.acct .thru { font-size: 12px; color: var(--muted); }
+.acct.missing { color: var(--muted); }
+.acct.missing:hover { color: var(--fg); border-color: var(--muted); }
+.acct.unassigned { border-color: var(--c-other); color: var(--c-other); }
+.acct.add { border-style: dashed; color: var(--accent); }
+.acct.hiddenacct { color: var(--muted); border-color: var(--line); }
+.switch { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; cursor: pointer; margin-bottom: 10px; user-select: none; }
+.switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.switch .track { width: 34px; height: 20px; border-radius: 999px; background: var(--line); position: relative; flex: none; transition: background-color .15s; }
+.switch .track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .15s; }
+.switch input:checked + .track { background: var(--accent); }
+.switch input:checked + .track::after { transform: translateX(14px); }
+.switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sugnote { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; border: 1px dashed var(--accent); border-radius: 10px; padding: 8px 12px; font-size: 14px; }
+.sug { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.tx.leftout .tx-name, .tx.leftout .tx-amt { color: var(--muted); }
+.acct.hiddenacct .box { border: 1.5px solid var(--c); }
+.acct.hiddenacct:hover { color: var(--fg); }
+.acct.editing .box { border-style: solid; border-color: var(--warn); color: var(--warn); }
+form.addacct { display: flex; gap: 6px; flex-wrap: wrap; }
+form.addacct input { flex: 1 1 10em; }
+.cell .ret { font-family: var(--mono); font-size: 10.5px; color: var(--refund); }
+.moneyin { margin-left: auto; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; display: grid; grid-template-columns: auto auto; column-gap: 12px; row-gap: 1px; font-size: 12.5px; color: var(--muted); }
+.moneyin .num { color: var(--fg); text-align: right; }
+.moneyin .ret-n { color: var(--refund); }
+.moneyin .cap { grid-column: 1 / 3; font-size: 11px; color: var(--faint); }
+.report { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.report h3 { font-family: var(--display); font-size: 20px; margin: 0; }
+.report .tablewrap { overflow-x: auto; }
+.report table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+.report th, .report td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.report th { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.report td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+.report .items { color: var(--muted); }
+.snaps .b { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.pick { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; width: 100%; }
+@media (prefers-reduced-motion: no-preference) { .cell, .chip, .biglist button { transition: border-color .15s, background-color .15s, color .15s; } }
+</style>
 
-
-function autoTag(desc) {
-  return "untagged";
-}
-
-// ── Palette ───────────────────────────────────────────────────────────────────
-const p = {
-  bg: "#0f1117", surface: "#1a1d27", card: "#22263a",
-  accent: "#6c63ff", text: "#e8eaf0", textMuted: "#8b90a0",
-  muted: "#4a4f6a", border: "#2a2f4a", red: "#e74c3c",
-  green: "#27ae60", amber: "#f39c12",
-};
-
-const css = `
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-  body { color: ${p.text}; font-family: 'Inter', sans-serif; }
-  input, select, textarea { background: ${p.bg}; color: ${p.text}; border: 1px solid ${p.border}; border-radius: 8px; padding: 10px 12px; font-family: 'Inter', sans-serif; font-size: 14px; width: 100%; outline: none; }
-  input:focus, select:focus, textarea:focus { border-color: ${p.accent}; }
-  select option { background: ${p.bg}; }
-  button { cursor: pointer; font-family: 'Inter', sans-serif; }
-  textarea { resize: vertical; min-height: 80px; }
-  .scrollbar::-webkit-scrollbar { width: 4px; }
-  .scrollbar::-webkit-scrollbar-thumb { background: ${p.border}; border-radius: 2px; }
-  .txn-row { background: ${p.card}; border: 1px solid ${p.border}; border-radius: 10px; padding: 12px; margin-bottom: 6px; }
-  .tag-btn { border-radius: 20px; padding: 3px 10px; font-size: 11px; font-weight: 600; border: 1px solid; cursor: pointer; transition: all .15s; white-space: nowrap; }
-  .bar { border-radius: 4px; height: 8px; transition: width .4s; }
-  .pill { display: inline-flex; align-items: center; gap: 4px; border-radius: 20px; padding: 2px 8px; font-size: 11px; font-weight: 600; border: 1px solid; }
-  .sync-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
-  .drop-zone { border: 2px dashed ${p.border}; border-radius: 12px; padding: 40px 20px; text-align: center; cursor: pointer; transition: border-color .2s; }
-  .drop-zone:hover, .drop-zone.drag-over { border-color: ${p.accent}; }
-  .stat-card { background: ${p.card}; border: 1px solid ${p.border}; border-radius: 12px; padding: 16px; }
-  .view-btn { padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 500; border: 1px solid; cursor: pointer; transition: all .15s; white-space: nowrap; }
-`;
-
-// ── useCloud hook ─────────────────────────────────────────────────────────────
-function useCloud(table, def = []) {
-  const [data, setData] = useState(def);
-  const [loaded, setLoaded] = useState(false);
-  useEffect(() => {
-    db.get(table).then(rows => { if (rows.length) setData(rows); setLoaded(true); }).catch(() => setLoaded(true));
-  }, [table]);
-  const save = useCallback(async (item) => {
-    const id = item.id || Date.now();
-    const withId = { ...item, id };
-    await db.upsert(table, id, withId);
-    setData(prev => { const ex = prev.find(x => x.id === withId.id); return ex ? prev.map(x => x.id === withId.id ? withId : x) : [...prev, withId]; });
-    return withId;
-  }, [table]);
-  const remove = useCallback(async (id) => { await db.delete(table, id); setData(prev => prev.filter(x => x.id !== id)); }, [table]);
-  const update = useCallback(async (id, changes) => {
-    setData(prev => {
-      const item = prev.find(x => x.id === id);
-      if (!item) return prev;
-      const updated = { ...item, ...changes };
-      db.upsert(table, id, updated);
-      return prev.map(x => x.id === id ? updated : x);
-    });
-  }, [table]);
-  const reload = useCallback(async () => {
-    const rows = await db.get(table);
-    if (rows.length) setData(rows);
-  }, [table]);
-  return [data, save, remove, update, loaded, reload];
-}
-
-// ── Components ────────────────────────────────────────────────────────────────
-// Single tag list — first tap=primary, second tap=secondary, tap selected=remove
-function TagButtons({ primary, secondary, onChangePrimary, onChangeSecondary }) {
-  function handleTap(tagId) {
-    if (tagId === "untagged") return;
-    if (primary === tagId) {
-      // Tap primary → remove primary (promote secondary to primary if exists)
-      onChangePrimary(secondary || "untagged");
-      onChangeSecondary(null);
-    } else if (secondary === tagId) {
-      // Tap secondary → remove secondary
-      onChangeSecondary(null);
-    } else if (!primary || primary === "untagged") {
-      // Nothing set → set as primary
-      onChangePrimary(tagId);
-    } else {
-      // Primary set, this is a different tag → set as secondary
-      onChangeSecondary(tagId);
-    }
-  }
-
-  return (
-    <div>
-      {(primary && primary !== "untagged") || secondary ? (
-        <div style={{ marginBottom: 6, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-          <span style={{ fontSize: 10, color: p.muted, textTransform: "uppercase", letterSpacing: ".5px" }}>Selected:</span>
-          {primary && primary !== "untagged" && (
-            <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 20, background: (TAGS.find(t=>t.id===primary)||TAGS[0]).bg, border: `1px solid ${(TAGS.find(t=>t.id===primary)||TAGS[0]).color}`, color: (TAGS.find(t=>t.id===primary)||TAGS[0]).color, fontWeight: 700 }}>
-              1° {(TAGS.find(t=>t.id===primary)||TAGS[0]).label}
-            </span>
-          )}
-          {secondary && (
-            <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 20, background: (TAGS.find(t=>t.id===secondary)||TAGS[0]).bg, border: `1px solid ${(TAGS.find(t=>t.id===secondary)||TAGS[0]).color}55`, color: (TAGS.find(t=>t.id===secondary)||TAGS[0]).color, opacity: 0.85 }}>
-              2° {(TAGS.find(t=>t.id===secondary)||TAGS[0]).label}
-            </span>
-          )}
-        </div>
-      ) : null}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-        {TAGS.filter(t => t.id !== "untagged").map(t => {
-          const isPrimary = primary === t.id;
-          const isSecondary = secondary === t.id;
-          return (
-            <button key={t.id} className="tag-btn"
-              onClick={() => handleTap(t.id)}
-              style={{
-                background: isPrimary ? t.bg : isSecondary ? t.bg + "88" : "none",
-                borderColor: isPrimary ? t.color : isSecondary ? t.color + "88" : p.border,
-                color: isPrimary ? t.color : isSecondary ? t.color + "cc" : p.muted,
-                fontWeight: isPrimary ? 700 : isSecondary ? 500 : 400,
-              }}>
-              {isPrimary ? "1° " : isSecondary ? "2° " : ""}{t.label}
-            </button>
-          );
-        })}
-      </div>
-      <div style={{ fontSize: 10, color: p.muted, marginTop: 5 }}>Tap once = primary · tap again = secondary · tap selected = remove</div>
+<div class="wrap">
+  <header class="top">
+    <h1>Day by Day</h1>
+    <div class="monthnav">
+      <button class="iconbtn" id="prev" aria-label="Previous month">‹</button>
+      <h2 id="monthLabel">October 2026</h2>
+      <button class="iconbtn" id="next" aria-label="Next month">›</button>
+      <button class="chip" id="reportBtn" style="margin-left:6px">Report</button>
     </div>
-  );
-}
+  </header>
 
+  <div id="banner" class="banner" hidden></div>
+  <section class="checks" id="checks" aria-label="Statements included this month"></section>
+  <input type="file" id="cardInput" accept=".csv,.txt,text/csv" multiple hidden>
+  <div id="summary" class="summary"></div>
+  <div id="sugNote" class="sugnote" hidden></div>
 
-function AccountPill({ accountId }) {
-  const acc = ACCOUNTS.find(a => a.id === accountId) || ACCOUNTS[ACCOUNTS.length - 1];
-  return <span className="pill" style={{ background: acc.color + "22", borderColor: acc.color + "44", color: acc.color }}>{acc.name}</span>;
-}
-
-function TagPill({ tagId }) {
-  const tag = TAGS.find(t => t.id === tagId) || TAGS[TAGS.length - 1];
-  return <span className="pill" style={{ background: tag.bg, borderColor: tag.color + "44", color: tag.color }}>{tag.label}</span>;
-}
-
-function Modal({ title, children, onClose }) {
-  return (
-    <div style={{ position: "fixed", inset: 0, background: "#000b", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={e => e.target === e.currentTarget && onClose()}>
-      <div style={{ background: p.surface, borderRadius: "16px 16px 0 0", padding: 20, width: "100%", maxWidth: 600, maxHeight: "92vh", overflowY: "auto", border: `1px solid ${p.border}` }} className="scrollbar">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-          <div style={{ fontSize: 17, fontWeight: 600, color: p.text }}>{title}</div>
-          <button onClick={onClose} style={{ background: "none", border: "none", color: p.muted, fontSize: 22, lineHeight: 1 }}>×</button>
-        </div>
-        {children}
+  <div class="main">
+    <div class="cal">
+      <label class="switch" for="noBills"><input type="checkbox" id="noBills"><span class="track" aria-hidden="true"></span>Leave out monthly bills</label>
+      <div class="dow"><span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span></div>
+      <div class="grid" id="grid"></div>
+      <div class="legend">
+        <span>Less<span class="ramp"></span>More</span>
+        <span><span class="dash">+$10</span> monthly bill expected</span>
+        <div class="moneyin" id="moneyin"></div>
       </div>
     </div>
-  );
-}
+    <div class="panel" id="panel"></div>
+  </div>
 
-function Label({ children }) {
-  return <div style={{ fontSize: 11, color: p.muted, marginBottom: 4, fontWeight: 600, letterSpacing: ".5px", textTransform: "uppercase" }}>{children}</div>;
-}
+  <section class="report" id="report" hidden></section>
 
-function FormButtons({ onSave, onCancel, saveLabel = "Save" }) {
-  return (
-    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 8 }}>
-      <button onClick={onCancel} style={{ background: "none", border: `1px solid ${p.border}`, color: p.muted, borderRadius: 8, padding: "9px 18px", fontSize: 13 }}>Cancel</button>
-      <button onClick={onSave} style={{ background: p.accent, color: "#fff", border: "none", borderRadius: 8, padding: "9px 18px", fontSize: 13, fontWeight: 600 }}>{saveLabel}</button>
-    </div>
-  );
-}
-
-// ── Transaction Row ───────────────────────────────────────────────────────────
-function TxnRow({ txn, onUpdate, onDelete, onApplyToAll, expanded, onToggle }) {
-  const tag = TAGS.find(t => t.id === txn.tag) || null;
-  const tag2 = txn.tag2 ? TAGS.find(t => t.id === txn.tag2) : null;
-  const isUntagged = !txn.tag || txn.tag === "untagged";
-
-  function handlePrimaryChange(newTag) {
-    const isRetag = txn.tag && txn.tag !== "untagged" && newTag !== txn.tag && newTag !== "untagged";
-    onUpdate(txn.id, { tag: newTag });
-    if (newTag && newTag !== "untagged") {
-      onApplyToAll(txn.description, newTag, txn.id, isRetag);
-    }
-  }
-
-  function handleSecondaryChange(newTag) {
-    onUpdate(txn.id, { tag2: newTag || null });
-  }
-
-  return (
-    <div className="txn-row" style={{ borderColor: isUntagged ? p.border : (tag ? tag.color + "44" : p.border) }}>
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-        <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={() => onToggle(txn.id)}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-            <div style={{ fontSize: 13, fontWeight: 500, color: p.text, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{txn.description}</div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: txn.amount < 0 ? p.green : p.red, flexShrink: 0 }}>{fmt(txn.amount)}</div>
-          </div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 5, alignItems: "center" }}>
-            <span style={{ fontSize: 11, color: p.muted }}>{txn.date}</span>
-            {isUntagged
-              ? <span style={{ fontSize: 11, color: p.muted, fontStyle: "italic" }}>Untagged</span>
-              : tag && <span className="pill" style={{ background: tag.bg, borderColor: tag.color + "55", color: tag.color, fontWeight: 600 }}>{tag.label}</span>
-            }
-            {tag2 && <span className="pill" style={{ background: tag2.bg, borderColor: tag2.color + "44", color: tag2.color, opacity: 0.8 }}>{tag2.label}</span>}
-          </div>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, flexShrink: 0 }}>
-          <button onClick={() => onDelete(txn.id)} style={{ background: "none", border: `1px solid ${p.red}44`, color: p.red, borderRadius: 5, padding: "3px 7px", fontSize: 11, lineHeight: 1.2 }}>✕</button>
-          <span style={{ fontSize: 10, color: p.muted, cursor: "pointer" }} onClick={() => onToggle(txn.id)}>{expanded ? "▲" : "▼"}</span>
-        </div>
+  <details class="section" id="uploadSec">
+    <summary><h3>Add statements</h3><span class="note" id="uploadNote"></span></summary>
+    <div class="inner">
+      <label class="drop" id="drop">
+        <input type="file" id="fileInput" accept=".csv,.txt,text/csv" multiple>
+        <strong>Drop your CSV files here, or tap to choose</strong>
+        <span class="help">You can add several at once. If it can't tell which card a file is from, it will ask. Or tap a card in the list at the top to upload straight to it.</span>
+        <span class="btn">Choose files</span>
+      </label>
+      <div class="files" id="files"></div>
+      <div class="help">
+        <b>Not counted as spending:</b> payments on the cards, payments to cards from your bank, transfers, and money coming in. Returns aren't subtracted from spending. They're listed separately on their day and in the box under the calendar. You can tap any item to count it or not.<br>
+        <b>Where to download:</b> on each card's website, open the account's transactions and look for Download, then choose CSV. Kohl's, Venture and Savor are all on capitalone.com.
       </div>
-
-      {expanded && (
-        <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${p.border}` }}>
-          <div style={{ marginBottom: 10 }}>
-            <AccountPill accountId={txn.account} />
-          </div>
-          <div style={{ marginBottom: 10 }}>
-            <Label>Tags</Label>
-            <TagButtons
-              primary={txn.tag || "untagged"}
-              secondary={txn.tag2 || null}
-              onChangePrimary={handlePrimaryChange}
-              onChangeSecondary={handleSecondaryChange}
-            />
-            <div style={{ fontSize: 10, color: p.muted, marginTop: 6, fontStyle: "italic" }}>
-              Merchant root: "<span style={{color: p.textMuted}}>{cleanMerchant(txn.description)}</span>"
-            </div>
-          </div>
-          <div style={{ marginBottom: 8 }}>
-            <Label>Notes</Label>
-            <input placeholder="Add a note..." value={txn.notes || ""} onChange={e => onUpdate(txn.id, { notes: e.target.value })} />
-          </div>
-        </div>
-      )}
+      <div id="clearArea"></div>
     </div>
-  );
-}
+  </details>
 
+  <details class="section" id="snapSec">
+    <summary><h3>Saved months</h3><span class="note" id="snapNote"></span></summary>
+    <div class="inner">
+      <p class="help" style="margin:0">A snapshot keeps a finished month's daily totals and purchases after you clear the transactions. Saved months show on the calendar when you go back to them. They're kept in this browser, so for a permanent copy, also save the month's report.</p>
+      <div class="row" id="snapNow"></div>
+      <div class="snaps" id="snaps"></div>
+    </div>
+  </details>
 
-// ── Breakdown ─────────────────────────────────────────────────────────────────
-function Breakdown({ txns }) {
-  const [chartType, setChartType] = useState("bar"); // "bar" or "pie"
-  const [drillDown, setDrillDown] = useState(null); // { type: "tag"|"cat"|"account", id }
+  <details class="section" id="billsSec">
+    <summary><h3>Monthly bills</h3><span class="note" id="billsNote"></span></summary>
+    <div class="inner">
+      <p class="help" style="margin:0">Card bills: tap <b>↻ Monthly</b> on any charge and it's remembered. Each month it shows up grayed out on its day until the real charge arrives on a statement. Bank bills you add below are counted automatically on their day. All of these stay saved when you clear transactions.</p>
+      <div class="bills" id="bills"></div>
+      <form class="cash" id="addBillForm" style="flex-direction:column;align-items:stretch">
+        <span class="label">Add a bill you pay from the bank</span>
+        <span class="note">Mortgage, utilities, insurance and the like. No statement needed: it's counted on its day each month.</span>
+        <div class="row"><input type="text" id="billName" placeholder="Name, like Mortgage" aria-label="Bill name" maxlength="40" style="flex:2 1 10em"><input type="number" id="billAmt" step="0.01" min="0" inputmode="decimal" placeholder="$0.00" aria-label="Amount" style="flex:1 1 6em"><input type="number" id="billDay" min="1" max="31" inputmode="numeric" placeholder="Day" aria-label="Day of the month" style="flex:0 1 5em"><button class="btn" type="submit">Add</button></div>
+        <span class="note" id="billMsg"></span>
+      </form>
+      <div id="sugs"></div>
+      <details class="sub">
+        <summary>Back up or restore your bills, cards and saved months</summary>
+        <div class="inner" style="padding:8px 0 0">
+          <p class="note" style="margin:0">Your bills, card list and saved months are kept in this browser only. Copy the backup and keep it somewhere safe, like a note on your phone.</p>
+          <div class="row"><button class="btn ghost" id="copyBackup">Copy backup</button><span class="note" id="copyMsg"></span></div>
+          <textarea id="restoreText" placeholder="Paste a backup here"></textarea>
+          <div class="row"><button class="btn ghost" id="restoreBtn">Restore</button><span class="note" id="restoreMsg"></span></div>
+        </div>
+      </details>
+    </div>
+  </details>
+</div>
 
-  const total = txns.filter(t => t.tag && t.tag !== "untagged").reduce((s, t) => s + (t.amount > 0 ? t.amount : 0), 0);
-  const grandTotal = txns.reduce((s, t) => s + (t.amount > 0 ? t.amount : 0), 0);
+<script>
+(function () {
+  const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const WD = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  const K_TX = "dbd.txns.v1", K_BILLS = "dbd.bills.v1", K_ACCTS = "dbd.accts.v1", K_MAP = "dbd.cardmap.v1", K_SNAP = "dbd.snaps.v1", K_NOBILLS = "dbd.nobills.v1", K_DISMISS = "dbd.notbills.v1";
+  const DEFAULT_ACCTS = ["Kohl's", "Venture", "Savor", "Lowe's", "Amazon"].map((name, i) => ({ name, c: i + 1 }));
 
-  const untaggedTxns = txns.filter(t => (!t.tag || t.tag === "untagged") && t.amount > 0);
-  const byTag = TAGS.filter(tag => tag.id !== "untagged").map(tag => {
-    const sum = txns.filter(t => t.tag === tag.id && t.amount > 0).reduce((s, t) => s + t.amount, 0);
-    const items = txns.filter(t => t.tag === tag.id && t.amount > 0);
-    return { ...tag, sum, pct: total ? +(sum / total * 100).toFixed(1) : 0, items };
-  }).filter(t => t.sum > 0).sort((a,b) => b.sum - a.sum);
+  const S = { txns: [], bills: [], accts: DEFAULT_ACCTS.slice(), map: {}, snaps: {}, hidden: [], noBills: false, dismissed: [], report: false, confirmDelSnap: "", sample: false, sampleBills: [], view: "", sel: null, files: [], confirmClear: false, editAccts: false, adding: false, pendingAcct: "" };
 
-  const byAccount = ACCOUNTS.map(acc => {
-    const sum = txns.filter(t => t.account === acc.id && t.amount > 0).reduce((s, t) => s + t.amount, 0);
-    const items = txns.filter(t => t.account === acc.id && t.amount > 0);
-    return { ...acc, sum, pct: total ? +(sum / total * 100).toFixed(1) : 0, items };
-  }).filter(a => a.sum > 0).sort((a,b) => b.sum - a.sum);
+  // ---------- helpers ----------
+  const pad = n => String(n).padStart(2, "0");
+  const niceDate = s => { const m = /^(\d{4})-(\d\d)-(\d\d)$/.exec(s || ""); return m ? ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][+m[2] - 1] + " " + (+m[3]) + ", " + m[1] : s; };
+  const todayStr = (() => { const d = new Date(); return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); })();
+  const uid = () => Math.random().toString(36).slice(2, 10);
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const money = (n) => (n < 0 ? "−" : "") + "$" + Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const short = (n) => { const a = Math.abs(n), s = n < 0 ? "−" : ""; return s + (a >= 1000 ? "$" + (a / 1000).toFixed(a >= 10000 ? 0 : 1) + "k" : "$" + Math.round(a)); };
+  const daysIn = (y, m) => new Date(y, m, 0).getDate();
+  const ord = d => d + (d % 10 === 1 && d !== 11 ? "st" : d % 10 === 2 && d !== 12 ? "nd" : d % 10 === 3 && d !== 13 ? "rd" : "th");
+  const acctColor = a => {
+    if (a === "Cash") return "var(--c-cash)";
+    if (a === "Bills") return "var(--accent)";
+    const x = S.accts.find(z => z.name === a);
+    return x ? `var(--k${x.c})` : "var(--c-other)";
+  };
 
-  // ── Pie Chart SVG ──
-  function PieChart({ data }) {
-    const size = 200;
-    const cx = size / 2, cy = size / 2, r = 80;
-    let angle = -Math.PI / 2;
-    const slices = data.map(d => {
-      const sweep = (d.pct / 100) * 2 * Math.PI;
-      const x1 = cx + r * Math.cos(angle);
-      const y1 = cy + r * Math.sin(angle);
-      angle += sweep;
-      const x2 = cx + r * Math.cos(angle);
-      const y2 = cy + r * Math.sin(angle);
-      const large = sweep > Math.PI ? 1 : 0;
-      return { ...d, x1, y1, x2, y2, large, sweep };
+  function load() {
+    try { const t = JSON.parse(localStorage.getItem(K_TX) || "[]"); if (Array.isArray(t)) S.txns = t; } catch (e) {}
+    try { const b = JSON.parse(localStorage.getItem(K_BILLS) || "[]"); if (Array.isArray(b)) S.bills = b; } catch (e) {}
+    try { const a = JSON.parse(localStorage.getItem(K_ACCTS) || "null"); if (Array.isArray(a)) S.accts = a; } catch (e) {}
+    try { const m = JSON.parse(localStorage.getItem(K_MAP) || "{}"); if (m && typeof m === "object") S.map = m; } catch (e) {}
+    try { const sn = JSON.parse(localStorage.getItem(K_SNAP) || "{}"); if (sn && typeof sn === "object") S.snaps = sn; } catch (e) {}
+    try { S.noBills = localStorage.getItem(K_NOBILLS) === "1"; } catch (e) {}
+    try { const d = JSON.parse(localStorage.getItem(K_DISMISS) || "[]"); if (Array.isArray(d)) S.dismissed = d; } catch (e) {}
+    // returns are no longer subtracted from spending
+    S.txns.forEach(t => { if (t.kind === "refund" && t.counted && !t.user) t.counted = false; });
+  }
+  function saveDismissed() { try { localStorage.setItem(K_DISMISS, JSON.stringify(S.dismissed)); } catch (e) {} }
+  // Charges that appear once a month, around the same day, in two or more months
+  function suggestions() {
+    const by = {};
+    if (!S.sample) S.txns.forEach(t => { if (!t.counted || t.amount <= 0 || t.acct === "Cash") return; const ym = t.date.slice(0, 7); (by[ym] = by[ym] || []).push({ key: t.key, name: t.name, amount: t.amount, d: +t.date.slice(8, 10) }); });
+    Object.values(S.snaps).forEach(sn => { if (by[sn.ym]) return; by[sn.ym] = sn.txns.filter(x => x.kind === "spend" && x.amount > 0 && x.acct !== "Cash").map(x => ({ key: keyOf(x.name), name: x.name, amount: x.amount, d: x.d })); });
+    const months = Object.keys(by).sort();
+    if (months.length < 2) return [];
+    const stat = {};
+    months.forEach(ym => {
+      const per = {}; by[ym].forEach(x => { (per[x.key] = per[x.key] || []).push(x); });
+      Object.entries(per).forEach(([k, arr]) => { const s = stat[k] = stat[k] || { seen: [], multi: false }; if (arr.length > 1) s.multi = true; else s.seen.push(Object.assign({ ym }, arr[0])); });
     });
-    return (
-      <svg viewBox={`0 0 ${size} ${size}`} style={{ width: "100%", maxWidth: 220, display: "block", margin: "0 auto" }}>
-        {slices.map((s, i) => s.sweep > 0.01 && (
-          <path key={i}
-            d={`M ${cx} ${cy} L ${s.x1} ${s.y1} A ${r} ${r} 0 ${s.large} 1 ${s.x2} ${s.y2} Z`}
-            fill={s.color} opacity={0.85} stroke="#0f1117" strokeWidth={2}
-            onClick={() => setDrillDown({ items: s.items, label: s.name || s.label, color: s.color })}
-            style={{ cursor: "pointer" }}
-          />
-        ))}
-        <circle cx={cx} cy={cy} r={40} fill="#0f1117" />
-        <text x={cx} y={cy-6} textAnchor="middle" fill="#e8eaf0" fontSize={11} fontWeight="600">{fmt(total)}</text>
-        <text x={cx} y={cy+10} textAnchor="middle" fill="#8b90a0" fontSize={9}>total</text>
-      </svg>
-    );
+    const have = new Set(bills().map(b => b.key));
+    const out = [];
+    Object.entries(stat).forEach(([k, s]) => {
+      if (!k || s.multi || s.seen.length < 2 || have.has(k) || S.dismissed.includes(k)) return;
+      const ds = s.seen.map(x => x.d);
+      if (Math.max(...ds) - Math.min(...ds) > 6) return;
+      const last = s.seen[s.seen.length - 1];
+      out.push({ key: k, name: last.name, amount: Math.round(last.amount * 100) / 100, day: last.d, n: s.seen.length });
+    });
+    return out.sort((a, b) => a.day - b.day);
   }
-
-  // ── Bar Chart ──
-  function BarChart({ data }) {
-    const maxVal = Math.max(...data.map(d => d.sum), 1);
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {data.map((d, i) => (
-          <div key={i} style={{ cursor: "pointer" }} onClick={() => setDrillDown({ items: d.items, label: d.name || d.label, color: d.color })}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
-              <span style={{ fontSize: 12, color: p.text }}>{"·"} {d.name || d.label}</span>
-              <span style={{ fontSize: 12, fontWeight: 600, color: p.text }}>{fmt(d.sum)} <span style={{ color: p.muted, fontWeight: 400 }}>({d.pct}%)</span></span>
-            </div>
-            <div style={{ background: p.border, borderRadius: 4, height: 10 }}>
-              <div style={{ width: `${(d.sum/maxVal)*100}%`, background: d.color, borderRadius: 4, height: 10, transition: "width .4s" }} />
-            </div>
-          </div>
-        ))}
-      </div>
-    );
+  function saveSnaps() { try { localStorage.setItem(K_SNAP, JSON.stringify(S.snaps)); } catch (e) {} }
+  function snapshotMonth(ym) {
+    const live = S.txns.filter(t => t.date.startsWith(ym));
+    if (!live.length) return false;
+    const keep = live.filter(t => t.counted || t.kind === "refund" || t.kind === "income");
+    const [sy, sm] = ym.split("-").map(Number), sdim = daysIn(sy, sm);
+    S.bills.filter(b => b.assumed && !live.some(t => t.counted && t.key === b.key)).forEach(b => keep.push({ date: ym + "-" + pad(Math.min(b.day, sdim)), name: b.name, acct: "Bills", amount: b.amount, counted: true, kind: "spend" }));
+    const thru = {}; live.forEach(t => { if (t.acct !== "Unassigned") thru[t.acct] = Math.max(thru[t.acct] || 0, +t.date.slice(8, 10)); });
+    S.snaps[ym] = { ym, savedAt: todayStr, thru, txns: keep.map(t => ({ d: +t.date.slice(8, 10), name: t.name, acct: t.acct, amount: t.amount, kind: t.counted ? "spend" : t.kind })) };
+    saveSnaps(); return true;
   }
-
-  function ChartSection({ title, data }) {
-    if (!data.length) return null;
-    return (
-      <div className="stat-card" style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: p.textMuted, marginBottom: 14, textTransform: "uppercase", letterSpacing: ".5px" }}>{title}</div>
-        {chartType === "pie" ? <PieChart data={data} /> : <BarChart data={data} />}
-        {chartType === "pie" && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12 }}>
-            {data.map((d, i) => (
-              <span key={i} onClick={() => setDrillDown({ items: d.items, label: d.name || d.label, color: d.color })}
-                style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: p.textMuted, cursor: "pointer" }}>
-                <span style={{ width: 8, height: 8, borderRadius: 2, background: d.color, display: "inline-block" }}></span>
-                {d.name || d.label} {d.pct}%
-              </span>
-            ))}
-          </div>
-        )}
-        <div style={{ fontSize: 10, color: p.muted, marginTop: 8 }}>Tap a bar or slice to see transactions</div>
-      </div>
-    );
+  function saveCfg() {
+    try { localStorage.setItem(K_ACCTS, JSON.stringify(S.accts)); } catch (e) {}
+    try { localStorage.setItem(K_MAP, JSON.stringify(S.map)); } catch (e) {}
   }
-
-  // ── Drill-down modal ──
-  if (drillDown) {
-    return (
-      <div>
-        <button onClick={() => setDrillDown(null)} style={{ background: "none", border: `1px solid ${p.border}`, color: p.textMuted, borderRadius: 8, padding: "8px 14px", fontSize: 13, marginBottom: 14, display: "flex", alignItems: "center", gap: 6 }}>
-          ← Back to Breakdown
-        </button>
-        <div style={{ fontSize: 16, fontWeight: 600, color: drillDown.color, marginBottom: 4 }}>{drillDown.label}</div>
-        <div style={{ fontSize: 12, color: p.muted, marginBottom: 14 }}>
-          {drillDown.items.length} transactions · {fmt(drillDown.items.reduce((s,t)=>s+t.amount,0))}
-        </div>
-        {drillDown.items.sort((a,b) => new Date(b.date)-new Date(a.date)).map((t, i) => (
-          <div key={i} style={{ background: p.card, border: `1px solid ${p.border}`, borderRadius: 8, padding: "10px 12px", marginBottom: 6 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-              <span style={{ fontSize: 13, color: p.text, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingRight: 8 }}>{t.description}</span>
-              <span style={{ fontSize: 13, fontWeight: 700, color: p.red, flexShrink: 0 }}>{fmt(t.amount)}</span>
-            </div>
-            <div style={{ fontSize: 11, color: p.muted, marginTop: 4 }}>{t.date} · {ACCOUNTS.find(a=>a.id===t.account)?.name || t.account}</div>
-          </div>
-        ))}
-      </div>
-    );
+  function addAcct(name) {
+    name = name.trim().slice(0, 24);
+    if (!name || S.accts.some(a => a.name.toLowerCase() === name.toLowerCase())) return false;
+    const used = new Set(S.accts.map(a => a.c));
+    let c = 1; while (used.has(c) && c < 8) c++;
+    if (used.has(c)) c = (S.accts.length % 8) + 1;
+    S.accts.push({ name, c }); saveCfg(); return true;
   }
-
-  // Credits (refunds, income)
-  const credits = txns.filter(t => t.amount < 0);
-  const totalCredits = credits.reduce((s,t) => s + Math.abs(t.amount), 0);
-  const [showCredits, setShowCredits] = useState(false);
-
-  return (
-    <div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <div className="stat-card" style={{ flex: 1 }}>
-          <div style={{ fontSize: 11, color: p.muted, marginBottom: 4, textTransform: "uppercase", letterSpacing: ".5px" }}>Spent</div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: p.red }}>{fmt(grandTotal)}</div>
-          <div style={{ fontSize: 11, color: p.muted, marginTop: 2 }}>{txns.filter(t=>t.amount>0).length} transactions</div>
-        </div>
-        <div className="stat-card" style={{ flex: 1 }}>
-          <div style={{ fontSize: 11, color: p.muted, marginBottom: 4, textTransform: "uppercase", letterSpacing: ".5px" }}>Credits</div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: p.green }}>{fmt(totalCredits)}</div>
-          <div style={{ fontSize: 11, color: p.muted, marginTop: 2 }}>{credits.length} credits</div>
-        </div>
-      </div>
-
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <div className="stat-card" style={{ flex: 1 }}>
-          <div style={{ fontSize: 11, color: p.muted, textTransform: "uppercase", letterSpacing: ".5px" }}>Net</div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: grandTotal - totalCredits > 0 ? p.red : p.green }}>{fmt(grandTotal - totalCredits)}</div>
-        </div>
-        <div className="stat-card" style={{ flex: 1 }}>
-          <div style={{ fontSize: 11, color: "#f39c12", marginBottom: 2, textTransform: "uppercase", letterSpacing: ".5px", fontSize: 11 }}>Untagged</div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: "#f39c12" }}>{fmt(untaggedTxns.reduce((s,t)=>s+t.amount,0))}</div>
-          <div style={{ fontSize: 11, color: p.muted, marginTop: 2 }}>{untaggedTxns.length} transactions</div>
-        </div>
-      </div>
-
-      {/* Credits / refunds section */}
-      {credits.length > 0 && (
-        <div className="stat-card" style={{ marginBottom: 12 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: p.green, textTransform: "uppercase", letterSpacing: ".5px" }}>💰 Credits & Refunds</div>
-            <button onClick={() => setShowCredits(s => !s)} style={{ background: "none", border: `1px solid ${p.border}`, color: p.muted, borderRadius: 6, padding: "3px 10px", fontSize: 11 }}>{showCredits ? "Hide ▲" : "Show ▼"}</button>
-          </div>
-          {showCredits && (
-            <div style={{ marginTop: 10 }}>
-              {credits.sort((a,b) => new Date(b.date)-new Date(a.date)).map((t,i) => (
-                <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: `1px solid ${p.border}` }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, color: p.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.description}</div>
-                    <div style={{ fontSize: 10, color: p.muted }}>{t.date} · {ACCOUNTS.find(a=>a.id===t.account)?.name || t.account}</div>
-                  </div>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: p.green, flexShrink: 0, marginLeft: 8 }}>+{fmt(Math.abs(t.amount))}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Chart toggle */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-        <button onClick={() => setChartType("bar")} style={{ flex: 1, padding: "8px", borderRadius: 8, border: `1px solid ${chartType==="bar" ? p.accent : p.border}`, background: chartType==="bar" ? p.accent+"22" : "none", color: chartType==="bar" ? p.accent : p.muted, fontSize: 13, fontWeight: 500 }}>
-          📊 Bar Chart
-        </button>
-        <button onClick={() => setChartType("pie")} style={{ flex: 1, padding: "8px", borderRadius: 8, border: `1px solid ${chartType==="pie" ? p.accent : p.border}`, background: chartType==="pie" ? p.accent+"22" : "none", color: chartType==="pie" ? p.accent : p.muted, fontSize: 13, fontWeight: 500 }}>
-          🥧 Pie Chart
-        </button>
-      </div>
-
-      <ChartSection title="By Tag" data={byTag} />
-      <ChartSection title="By Account" data={byAccount} />
-    </div>
-  );
-}
-
-// ── BulkTagModal — checkbox list for bulk tagging ────────────────────────────
-function BulkTagModal({ modal, onConfirm, onClose }) {
-  const { matches, tag: initialTag, tagLabel: initialTagLabel, root } = modal;
-  const [selectedTag, setSelectedTag] = React.useState(initialTag !== "other" ? initialTag : null);
-  const [selected, setSelected] = React.useState(() => {
-    const init = {};
-    matches.forEach(t => { init[t.id] = true; });
-    return init;
-  });
-
-  const allSelected = matches.every(t => selected[t.id]);
-  const selectedCount = Object.values(selected).filter(Boolean).length;
-  const currentTag = TAGS.find(t => t.id === selectedTag);
-  const needsTagPick = initialTag === "other"; // search mode — pick tag inside modal
-
-  function toggleAll() {
-    const next = {};
-    matches.forEach(t => { next[t.id] = !allSelected; });
-    setSelected(next);
+  function matchAcctByName(fn) {
+    const flat = fn.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const hit = S.accts.find(a => { const w = a.name.toLowerCase().replace(/[^a-z0-9 ]/g, "").split(" ")[0]; return w.length >= 3 && flat.includes(w); });
+    return hit ? hit.name : "";
   }
-
-  function toggle(id) {
-    setSelected(prev => ({ ...prev, [id]: !prev[id] }));
+  function save() {
+    if (!S.sample) try { localStorage.setItem(K_TX, JSON.stringify(S.txns)); } catch (e) {}
+    try { localStorage.setItem(K_BILLS, JSON.stringify(S.bills)); } catch (e) {}
   }
+  const bills = () => S.sample ? S.sampleBills : S.bills;
 
-  const accent = currentTag ? currentTag.color : p.accent;
-  const tagBg = currentTag ? currentTag.bg : p.surface;
+  // ---------- merchant names ----------
+  function cleanName(desc) {
+    let s = " " + desc + " ";
+    s = s.replace(/\b(POS|DEBIT CARD|CHECKCARD|PURCHASE|RECURRING|AUTHORIZED ON \d\d\/\d\d|ACH|WEB|PPD|ID:?\s*\w+)\b/gi, " ");
+    s = s.replace(/^\s*(SQ|TST|SP|PY|DD|PAYPAL|IC|BT|DNH)\s*\*\s*/i, " ");
+    s = s.replace(/\s(SQ|TST|SP|PY)\s?\*/gi, " ");
+    s = s.replace(/\*\s*[\w]{4,}/g, " ").replace(/#\s?\d+/g, " ").replace(/\b\d{3}[-.]\d{3}[-.]\d{4}\b/g, " ");
+    s = s.replace(/\b[\w-]*\d{4,}[\w-]*\b/g, " ").replace(/\b(CA|NV|OR|WA|AZ|TX|NY)\s*$/i, " ");
+    s = s.replace(/[*]/g, " ").replace(/\s{2,}/g, " ").trim();
+    if (!s) s = desc.trim();
+    s = s.toLowerCase().replace(/\b([a-z])/g, c => c.toUpperCase()).replace(/\b(Llc|Inc|Co)\b\.?/g, "").trim();
+    s = s.replace(/\bAmzn\b|\bAmazon Mktpl?\w*/i, "Amazon");
+    return s.length > 34 ? s.slice(0, 33) + "…" : s;
+  }
+  const keyOf = name => name.toUpperCase().replace(/[^A-Z0-9 ]/g, "").split(/\s+/).filter(Boolean).slice(0, 2).join(" ");
 
-  return (
-    <div style={{ position: "fixed", inset: 0, background: "#000c", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
-      onClick={e => e.target === e.currentTarget && onClose()}>
-      <div style={{ background: "#1a1d27", borderRadius: 14, width: "100%", maxWidth: 520, maxHeight: "88vh", display: "flex", flexDirection: "column", border: "1px solid #2a2f4a", overflow: "hidden" }}>
-
-        {/* Header */}
-        <div style={{ padding: "14px 18px 10px", borderBottom: "1px solid #2a2f4a", flexShrink: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "#e8eaf0", marginBottom: 2 }}>
-            {needsTagPick ? `Tag results for "${root}"` : `Tag as: `}
-            {!needsTagPick && <span style={{ color: accent }}>{initialTagLabel}</span>}
-          </div>
-          <div style={{ fontSize: 12, color: "#8b90a0" }}>
-            {matches.length} transaction{matches.length !== 1 ? "s" : ""} · {selectedCount} selected
-          </div>
-        </div>
-
-        {/* Tag picker — only shown in search mode */}
-        {needsTagPick && (
-          <div style={{ padding: "10px 18px", borderBottom: "1px solid #2a2f4a", flexShrink: 0 }}>
-            <div style={{ fontSize: 10, color: p.muted, marginBottom: 6, textTransform: "uppercase", letterSpacing: ".5px", fontWeight: 600 }}>Choose tag to apply</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, maxHeight: 120, overflowY: "auto" }}>
-              {TAGS.filter(t => t.id !== "untagged").map(t => (
-                <button key={t.id} onClick={() => setSelectedTag(t.id)}
-                  style={{ padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: selectedTag === t.id ? 700 : 400, border: `1px solid ${selectedTag === t.id ? t.color : "#2a2f4a"}`, background: selectedTag === t.id ? t.bg : "none", color: selectedTag === t.id ? t.color : "#8b90a0", cursor: "pointer" }}>
-                  {t.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Select All / Deselect All */}
-        <div style={{ padding: "8px 18px", borderBottom: "1px solid #2a2f4a", display: "flex", gap: 8, flexShrink: 0 }}>
-          <button onClick={toggleAll} style={{ fontSize: 12, padding: "4px 12px", borderRadius: 6, border: "1px solid #2a2f4a", background: "none", color: "#8b90a0", cursor: "pointer" }}>
-            {allSelected ? "Deselect All" : "Select All"}
-          </button>
-          <span style={{ fontSize: 12, color: "#4a4f6a", lineHeight: "28px" }}>{selectedCount} of {matches.length}</span>
-        </div>
-
-        {/* Transaction list */}
-        <div style={{ overflowY: "auto", flex: 1, padding: "6px 0" }}>
-          {matches.map(t => (
-            <div key={t.id} onClick={() => toggle(t.id)}
-              style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 18px", cursor: "pointer", background: selected[t.id] ? tagBg + "66" : "none", borderLeft: selected[t.id] ? `3px solid ${accent}` : "3px solid transparent", transition: "all .1s" }}>
-              <div style={{ width: 18, height: 18, borderRadius: 4, border: `2px solid ${selected[t.id] ? accent : "#4a4f6a"}`, background: selected[t.id] ? accent : "none", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                {selected[t.id] && <span style={{ color: "#0f1117", fontSize: 12, fontWeight: 900, lineHeight: 1 }}>✓</span>}
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, color: "#e8eaf0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.description}</div>
-                <div style={{ fontSize: 11, color: "#8b90a0", marginTop: 2 }}>
-                  {t.date} · ${Math.abs(t.amount).toFixed(2)}
-                  {t.tag && t.tag !== "untagged" ? ` · ${(TAGS.find(x=>x.id===t.tag)||TAGS[0]).label}` : " · Untagged"}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Footer */}
-        <div style={{ padding: "12px 18px", borderTop: "1px solid #2a2f4a", display: "flex", gap: 10, justifyContent: "flex-end", flexShrink: 0 }}>
-          <button onClick={onClose} style={{ padding: "9px 18px", borderRadius: 8, border: "1px solid #2a2f4a", background: "none", color: "#8b90a0", fontSize: 13, cursor: "pointer" }}>Cancel</button>
-          <button
-            onClick={() => {
-              if (!selectedTag && needsTagPick) return;
-              onConfirm(matches.filter(t => selected[t.id]), selectedTag || initialTag);
-              onClose();
-            }}
-            disabled={selectedCount === 0 || (needsTagPick && !selectedTag)}
-            style={{ padding: "9px 18px", borderRadius: 8, border: "none", background: (selectedCount === 0 || (needsTagPick && !selectedTag)) ? "#2a2f4a" : accent, color: (selectedCount === 0 || (needsTagPick && !selectedTag)) ? "#4a4f6a" : "#0f1117", fontSize: 13, fontWeight: 700, cursor: (selectedCount === 0 || (needsTagPick && !selectedTag)) ? "not-allowed" : "pointer" }}>
-            {needsTagPick && !selectedTag ? "Pick a tag first" : `Apply to ${selectedCount} transaction${selectedCount !== 1 ? "s" : ""}`}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-
-// ── Main App ──────────────────────────────────────────────────────────────────
-function BudgetTracker() {
-  const [tab, setTab] = useState(0);
-  const [syncing, setSyncing] = useState(false);
-  const [txns, saveTxn, deleteTxn, updateTxn, txnsLoaded, reloadTxns] = useCloud("transactions");
-  const [cashTxns, saveCash, deleteCash, updateCash, , reloadCash] = useCloud("cash_transactions");
-  const [trashTxns, saveToTrash, deleteFromTrash, , , reloadTrash] = useCloud("trash_transactions");
-
-  const allTxns = [...txns, ...cashTxns].sort((a, b) => new Date(b.date) - new Date(a.date));
-
-  // Time filter
-  const [view, setView] = useState(3); // 0=month,1=year,2=custom,3=all
-  const now = new Date();
-  const [selMonth, setSelMonth] = useState(now.getMonth());
-  const [selYear, setSelYear] = useState(now.getFullYear());
-  const [customStart, setCustomStart] = useState("");
-  const [customEnd, setCustomEnd] = useState("");
-  const [filterAccount, setFilterAccount] = useState("all");
-  const [filterTag, setFilterTag] = useState("all");
-  const [filterMin, setFilterMin] = useState("");
-  const [filterMax, setFilterMax] = useState("");
-  const [showCreditsOnly, setShowCreditsOnly] = useState(false);
-  const [showUntaggedOnly, setShowUntaggedOnly] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [breakdownSearch, setBreakdownSearch] = useState("");
-  const [expandedTxnId, setExpandedTxnId] = useState(null);
-  const [bulkTagModal, setBulkTagModal] = useState(null); // { matches, tag, tagLabel, root }
-  const [bulkSelected, setBulkSelected] = useState({});
-  const [searchBulkModal, setSearchBulkModal] = useState(null); // { matches } for tag-all-results
-
-  // Upload state
-  const [uploadAccount, setUploadAccount] = useState("jessica_chase");
-  const [uploadPreview, setUploadPreview] = useState([]);
-  const [rawCSVText, setRawCSVText] = useState("");
-  const [dragOver, setDragOver] = useState(false);
-  const [uploadMsg, setUploadMsg] = useState("");
-  const [showClearConfirm, setShowClearConfirm] = useState(false);
-
-  // Cash form
-  const [cashForm, setCashForm] = useState({ date: today(), description: "", amount: "", tag: "untagged", notes: "", type: "debit" });
-
-  const withSync = async (fn) => { setSyncing(true); try { await fn(); } finally { setSyncing(false); } };
-
-  function filterTxns(list) {
-    let filtered = list;
-    // Keyword search stacks WITH all other filters
-    if (searchQuery.trim()) {
-      const q = searchQuery.trim().toLowerCase();
-      filtered = filtered.filter(t => t.description.toLowerCase().includes(q) || (t.notes && t.notes.toLowerCase().includes(q)));
+  // ---------- CSV ----------
+  function parseCSV(text) {
+    const head = text.split("\n").slice(0, 5).join("\n");
+    const d = (head.match(/\t/g) || []).length > (head.match(/,/g) || []).length ? "\t" : ",";
+    const rows = []; let row = [], cur = "", q = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (q) { if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += c; }
+      else if (c === '"') q = true;
+      else if (c === d) { row.push(cur); cur = ""; }
+      else if (c === "\n") { row.push(cur); rows.push(row); row = []; cur = ""; }
+      else if (c !== "\r") cur += c;
     }
-    if (filterAccount !== "all") filtered = filtered.filter(t => t.account === filterAccount);
-    if (filterTag !== "all") filtered = filtered.filter(t => t.tag === filterTag || t.tag2 === filterTag);
-    if (view === 0) filtered = filtered.filter(t => { const d = new Date(t.date); return d.getMonth() === selMonth && d.getFullYear() === selYear; });
-    else if (view === 1) filtered = filtered.filter(t => new Date(t.date).getFullYear() === selYear);
-    else if (view === 2 && customStart && customEnd) filtered = filtered.filter(t => t.date >= customStart && t.date <= customEnd);
-    if (showCreditsOnly) filtered = filtered.filter(t => t.amount < 0);
-    else if (showUntaggedOnly) filtered = filtered.filter(t => !t.tag || t.tag === "untagged");
-    else if (filterMin !== "") filtered = filtered.filter(t => t.amount >= parseFloat(filterMin));
-    if (!showCreditsOnly && !showUntaggedOnly && filterMax !== "") filtered = filtered.filter(t => t.amount <= parseFloat(filterMax));
-    return filtered;
+    row.push(cur); rows.push(row);
+    return rows.filter(r => r.some(x => x.trim()));
+  }
+  function parseMoney(s) {
+    if (s == null) return NaN; s = String(s).trim(); if (!s) return NaN;
+    let neg = false;
+    if (/^\(.*\)$/.test(s)) { neg = true; s = s.slice(1, -1); }
+    s = s.replace(/[$,\s]/g, "");
+    if (s.startsWith("-")) { neg = !neg; s = s.slice(1); }
+    const n = parseFloat(s); return isNaN(n) ? NaN : (neg ? -n : n);
+  }
+  function parseDate(s) {
+    s = (s || "").trim(); let m;
+    if ((m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))) return m[1] + "-" + pad(+m[2]) + "-" + pad(+m[3]);
+    if ((m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/))) { let y = +m[3]; if (y < 100) y += 2000; return y + "-" + pad(+m[1]) + "-" + pad(+m[2]); }
+    return null;
+  }
+  function classify(out, desc, isBank) {
+    const d = desc.toLowerCase();
+    if (isBank) {
+      if (out > 0) {
+        const transfer = /(online|internal|share|mobile|instant) transfer|transfer (to|from)|\bxfer\b|synchrony|forbright/.test(d);
+        const cardPay = /(chase|capital one|cap one|crcardpmt|card serv|credit card|citi|amex|american express|discover|barclay)/.test(d) && /(pay|pmt|epay|autopay|ach|crcard)/.test(d);
+        return transfer || cardPay ? "payment" : "spend";
+      }
+      return "income";
+    }
+    if (out > 0) return /payment\s*-?\s*thank|autopay payment/.test(d) ? "payment" : "spend";
+    return /pay|thank/.test(d) ? "payment" : "refund";
   }
 
-  const filtered = filterTxns(allTxns);
-  const breakdownFiltered = breakdownSearch.trim()
-    ? filtered.filter(t => t.description.toLowerCase().includes(breakdownSearch.trim().toLowerCase()) || (t.notes && t.notes.toLowerCase().includes(breakdownSearch.trim().toLowerCase())))
-    : filtered;
+  function importFile(name, text, flip, fileId, forced) {
+    const rows = parseCSV(text);
+    let h = -1;
+    for (let i = 0; i < Math.min(rows.length, 15); i++) {
+      const low = rows[i].map(x => x.trim().toLowerCase());
+      if (low.some(x => x.includes("date")) && low.some(x => /amount|debit|credit|withdraw/.test(x))) { h = i; break; }
+    }
+    const stat = { id: fileId || uid(), name, text, flip: !!flip, acct: "", spend: 0, refunds: 0, skipped: 0, dups: 0, total: 0, err: "" };
+    if (h < 0) { stat.err = "Couldn't find the column names (Date, Description, Amount) in this file."; return stat; }
+    const low = rows[h].map(x => x.trim().toLowerCase());
+    const find = (...res) => { for (const re of res) { const i = low.findIndex(x => re.test(x)); if (i >= 0) return i; } return -1; };
+    const di = find(/^trans(action)?\.?\s?date/, /^date$/, /date/);
+    const si = find(/desc/, /payee/, /merchant/, /^name$/, /memo/);
+    const ai = find(/^amount$/, /amount/);
+    const dbi = find(/debit/, /withdraw/), cri = find(/credit/, /deposit/);
+    const hdr = low.join("|"), fn = name.toLowerCase();
+    if (di < 0 || si < 0 || (ai < 0 && dbi < 0)) { stat.err = "This file is missing a date, description or amount column."; return stat; }
 
-  function processCSV(text, accountId, existingTxns = []) {
-    const parser = autoDetectParser(text);
-    const rows = parser(text);
-    // Build a dedup key set from existing transactions
-    const existingKeys = new Set(existingTxns.map(t => `${t.account}_${t.date}_${String(t.amount)}_${t.description.slice(0,30).toLowerCase().replace(/[^a-z0-9]/g,"_")}`));
-    const dupeCount = { count: 0 };
-    const results = rows
-      .filter(r => !SKIP_KEYWORDS.some(k => r.description.toLowerCase().includes(k)))
-      .map(r => {
-        const dupKey = `${accountId}_${r.date}_${String(r.amount)}_${r.description.slice(0,30).toLowerCase().replace(/[^a-z0-9]/g,"_")}`;
-        const isDupe = existingKeys.has(dupKey);
-        if (isDupe) dupeCount.count++;
-        return {
-          id: `${accountId}_${r.date}_${r.description.slice(0,20).replace(/[^a-zA-Z0-9]/g,"_")}_${Math.abs(r.amount).toFixed(0)}_${Math.random().toString(36).slice(2,8)}`,
-          date: r.date,
-          description: r.description,
-          amount: r.amount,
-          account: accountId,
-              tag: autoTag(r.description),
-          notes: "",
-          _isDupe: isDupe,
-        };
-      });
-    return { results, dupeCount: dupeCount.count };
+    // Which card? Use the last 4 digits when the file has them, then the file name.
+    let last4 = "";
+    const cn = find(/card\s?n(o|um)/);
+    if (cn >= 0) for (let i = h + 1; i < rows.length && !last4; i++) { const m = String(rows[i][cn] || "").match(/(\d{4})\s*$/); if (m) last4 = m[1]; }
+    if (!last4) { const m = name.match(/^[a-z]+(\d{4})_/i) || name.match(/(?:ending|card|x{2,}|\.{3})[\s_-]?(\d{4})/i); if (m) last4 = m[1]; }
+    const sig = last4 ? "l4:" + last4 : "";
+    const known = n => n && S.accts.some(a => a.name === n) ? n : "";
+    const acct = known(forced) || known(sig && S.map[sig]) || matchAcctByName(name);
+    if (forced && sig) { S.map[sig] = forced; saveCfg(); }
+    stat.acct = acct; stat.sig = sig; stat.last4 = last4; stat.needs = !acct;
+    const isBank = /balance|withdraw|deposit/.test(hdr) || /alliant|checking/.test(fn);
+
+    // existing keys from other files, for duplicate detection
+    const seen = {};
+    S.txns.forEach(t => { if (t.fileId !== stat.id) { const k = t.date + "|" + t.desc + "|" + t.raw; seen[k] = (seen[k] || 0) + 1; } });
+
+    for (let i = h + 1; i < rows.length; i++) {
+      const r = rows[i];
+      const date = parseDate(r[di]); const desc = (r[si] || "").trim();
+      if (!date || !desc) continue;
+      let out;
+      if (ai >= 0 && !isNaN(parseMoney(r[ai]))) out = -parseMoney(r[ai]);
+      else { const db = parseMoney(r[dbi]), cr = cri >= 0 ? parseMoney(r[cri]) : NaN; out = !isNaN(db) && db !== 0 ? Math.abs(db) : !isNaN(cr) ? -Math.abs(cr) : NaN; }
+      if (isNaN(out) || out === 0) continue;
+      if (flip) out = -out;
+      const raw = Math.round(out * 100) / 100;
+      const k = date + "|" + desc + "|" + raw;
+      if (seen[k] > 0) { seen[k]--; stat.dups++; continue; }
+      const kind = classify(raw, desc, isBank);
+      const counted = kind === "spend";
+      const nm = cleanName(desc);
+      S.txns.push({ id: uid(), fileId: stat.id, acct: acct || "Unassigned", date, desc, raw, name: nm, key: keyOf(nm), amount: raw, kind, counted });
+      stat.total++;
+      if (kind === "spend") stat.spend++; else if (kind === "refund") stat.refunds++; else stat.skipped++;
+    }
+    if (!stat.total && !stat.dups) stat.err = "No transactions found in this file.";
+    return stat;
   }
 
-  function handleFile(file) {
-    handleFiles([file]);
-  }
-
-  function handleFiles(files) {
-    if (!files || files.length === 0) return;
-    setUploadMsg(`Reading ${files.length} file${files.length > 1 ? "s" : ""}...`);
-    const allResults = [];
-    let totalDupes = 0;
-    let loaded = 0;
-    Array.from(files).forEach(file => {
-      const reader = new FileReader();
-      reader.onload = e => {
-        try {
-          const text = e.target.result;
-          const { results, dupeCount } = processCSV(text, uploadAccount, allTxns);
-          const newOnes = results.filter(r => !r._isDupe);
-          allResults.push(...newOnes);
-          totalDupes += dupeCount;
-        } catch(err) {
-          // skip unreadable files
-        }
-        loaded++;
-        if (loaded === files.length) {
-          // All files read — combine and show preview
-          setRawCSVText(""); // clear single-file raw text
-          setUploadPreview(allResults);
-          const msg = files.length > 1
-            ? `${files.length} files read — ${allResults.length} new transactions${totalDupes > 0 ? `, ${totalDupes} duplicates skipped` : ""}. Review below then click Import.`
-            : `Found ${allResults.length} transactions${totalDupes > 0 ? ` (${totalDupes} duplicates skipped)` : ""}. Review below then click Import.`;
-          setUploadMsg(msg);
-        }
+  function handleFiles(list, forced) {
+    const files = Array.from(list || []);
+    if (!files.length) return;
+    if (S.sample) { S.sample = false; S.txns = []; S.files = []; S.sel = null; }
+    let done = 0; const added = [];
+    files.forEach(f => {
+      const rd = new FileReader();
+      rd.onload = () => {
+        const st = importFile(f.name, String(rd.result || ""), false, null, forced);
+        S.files.push(st); added.push(st);
+        if (++done === files.length) finishImport(added);
       };
-      reader.readAsText(file);
+      rd.onerror = () => { S.files.push({ id: uid(), name: f.name, err: "Couldn't read this file." }); if (++done === files.length) finishImport(added); };
+      rd.readAsText(f);
     });
   }
-
-  function reprocessWithAccount(accountId) {
-    if (!rawCSVText) return;
-    try {
-      const { results, dupeCount } = processCSV(rawCSVText, accountId, allTxns);
-      const newOnes = results.filter(r => !r._isDupe);
-      setUploadPreview(newOnes);
-      if (dupeCount > 0) setUploadMsg(`${newOnes.length} new transactions (${dupeCount} duplicates skipped).`);
-    } catch(err) {}
+  function finishImport(added) {
+    const ids = new Set(added.map(a => a.id));
+    const dates = S.txns.filter(t => ids.has(t.fileId) && t.counted).map(t => t.date).sort();
+    if (dates.length) S.view = dates[dates.length - 1].slice(0, 7);
+    S.sel = null; save(); render();
+  }
+  function flipFile(id) {
+    const f = S.files.find(x => x.id === id); if (!f || !f.text) return;
+    S.txns = S.txns.filter(t => t.fileId !== id);
+    const st = importFile(f.name, f.text, !f.flip, id, f.acct);
+    S.files[S.files.indexOf(f)] = st; save(); render();
+  }
+  function assignFile(id, name) {
+    const f = S.files.find(x => x.id === id); if (!f) return;
+    S.txns.forEach(t => { if (t.fileId === id) t.acct = name; });
+    f.acct = name; f.needs = false;
+    if (f.sig) { S.map[f.sig] = name; saveCfg(); }
+    save(); render();
   }
 
-  async function importAll() {
-    setSyncing(true);
-    const total = uploadPreview.length;
-    setUploadMsg(`Importing ${total} transactions...`);
-    try {
-      // Clean _isDupe flag before saving
-      const clean = uploadPreview.map(({ _isDupe, ...t }) => t);
-      await db.bulkUpsert("transactions", clean);
-      // Small delay to let Supabase commit before reload
-      await new Promise(r => setTimeout(r, 600));
-      await reloadTxns();
-      setSyncing(false);
-      setUploadPreview([]);
-      setUploadMsg(`✅ Imported ${total} transactions!`);
-      setTab(0);
-    } catch(err) {
-      setSyncing(false);
-      setUploadMsg(`❌ Import failed: ${err.message || "Please try again."}`);
+  // ---------- month model ----------
+  function monthModel() {
+    const [y, m] = S.view.split("-").map(Number);
+    const dim = daysIn(y, m);
+    let tx = S.txns.filter(t => t.date.startsWith(S.view)), snap = null;
+    if (!tx.length && !S.sample && S.snaps[S.view]) {
+      snap = S.snaps[S.view];
+      tx = snap.txns.map((x, i) => ({ id: "s" + i, acct: x.acct, date: S.view + "-" + pad(x.d), desc: x.name, name: x.name, key: keyOf(x.name), amount: x.amount, kind: x.kind, counted: x.kind === "spend", ro: true }));
     }
+    // Bills paid from the bank: counted on their day once it arrives (no statement needed)
+    if (!snap) {
+      const curYm = todayStr.slice(0, 7), today = +todayStr.slice(8, 10);
+      if (tx.length || S.view === curYm) bills().filter(b => b.assumed).forEach(b => {
+        if (tx.some(t => t.counted && t.key === b.key)) return;
+        const d = Math.min(b.day, dim);
+        if (S.view < curYm || (S.view === curYm && d <= today)) tx.push({ id: "b" + b.key, acct: "Bills", date: S.view + "-" + pad(d), desc: b.name, name: b.name, key: b.key, amount: b.amount, kind: "spend", counted: true, ro: true, assumed: true });
+      });
+    }
+    const allTx = tx;
+    const filtering = S.hidden.length > 0;
+    if (filtering) tx = tx.filter(t => t.acct !== "Unassigned" && !S.hidden.includes(t.acct));
+    const days = {};
+    for (let d = 1; d <= dim; d++) days[d] = { total: 0, items: [], billItems: [], billTotal: 0, off: [], returns: [], ret: 0, expected: [] };
+    const bk = new Set(bills().map(b => b.key));
+    let income = 0, returns = 0;
+    tx.forEach(t => {
+      const d = +t.date.slice(8, 10); if (!days[d]) return;
+      if (t.counted && S.noBills && bk.has(t.key)) { days[d].billItems.push(t); days[d].billTotal += t.amount; }
+      else if (t.counted) { days[d].items.push(t); days[d].total += t.amount; }
+      else if (t.kind === "refund") { days[d].returns.push(t); days[d].ret += Math.abs(t.amount); returns += Math.abs(t.amount); }
+      else { days[d].off.push(t); if (t.kind === "income") income += Math.abs(t.amount); }
+    });
+    const billKeys = new Set(bills().map(b => b.key));
+    const seenKeys = new Set(tx.filter(t => t.counted).map(t => t.key));
+    let expectedLeft = 0;
+    if (!snap && !filtering) bills().forEach(b => { if (!seenKeys.has(b.key)) { const d = Math.min(b.day, dim); days[d].expected.push(b); expectedLeft += b.amount; } });
+    const spent = tx.filter(t => t.counted && !(S.noBills && billKeys.has(t.key))).reduce((s, t) => s + t.amount, 0);
+    const billSpent = tx.filter(t => t.counted && billKeys.has(t.key)).reduce((s, t) => s + t.amount, 0);
+    const dataDays = tx.map(t => +t.date.slice(8, 10));
+    let lastDay = dataDays.length ? Math.max(...dataDays) : 0;
+    if (S.view === todayStr.slice(0, 7)) lastDay = Math.max(lastDay, +todayStr.slice(8, 10) - 1);
+    const maxDay = Math.max(0, ...Object.values(days).map(x => x.total));
+    return { y, m, dim, days, tx, allTx, filtering, snap, income, returns, spent, billSpent, expectedLeft, lastDay, maxDay, hasData: tx.length > 0, billKeys };
   }
 
-  const years = [];
-  const minYear = allTxns.length ? Math.min(...allTxns.map(t => new Date(t.date).getFullYear())) : now.getFullYear();
-  for (let y = minYear; y <= now.getFullYear() + 1; y++) years.push(y);
+  // ---------- render ----------
+  const $ = id => document.getElementById(id);
 
-  return (
-    <>
-      <style>{css}</style>
-      <div style={{ minHeight: "100vh", background: p.bg }}>
+  function render() {
+    const M = monthModel();
+    $("monthLabel").textContent = MONTHS[M.m - 1] + " " + M.y;
 
-        {/* Header */}
-        <div style={{ background: p.surface, borderBottom: `1px solid ${p.border}`, padding: "14px 16px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: p.text }}>Budget Tracker</div>
-              <div style={{ fontSize: 11, color: p.muted, marginTop: 1, letterSpacing: "1px", textTransform: "uppercase" }}>Carey Household</div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11 }}>
-              <span className="sync-dot" style={{ background: syncing ? p.amber : p.green }}></span>
-              <span style={{ color: p.muted }}>{syncing ? "Saving…" : "Synced"}</span>
-            </div>
-          </div>
-        </div>
+    const ban = $("banner");
+    if (S.sample) { ban.hidden = false; ban.innerHTML = "<strong>These are example transactions.</strong> Add your statements below and they'll replace the examples."; }
+    else if (M.snap) { ban.hidden = false; ban.innerHTML = `<strong>Saved snapshot of ${MONTHS[M.m - 1]}</strong>, saved ${esc(niceDate(M.snap.savedAt))}. This month's transactions were cleared, so it's view only.`; }
+    else ban.hidden = true;
 
-        {/* Tabs */}
-        <div style={{ display: "flex", background: p.surface, borderBottom: `1px solid ${p.border}`, overflowX: "auto" }}>
-          {TABS.map((t, i) => (
-            <button key={i} onClick={() => setTab(i)} style={{ padding: "10px 13px", fontSize: 12, fontWeight: 500, whiteSpace: "nowrap", background: "none", border: "none", borderBottom: tab === i ? `2px solid ${p.accent}` : "2px solid transparent", color: tab === i ? p.accent : p.muted, transition: "all .15s" }}>{t}</button>
-          ))}
-        </div>
+    // summary
+    const avg = M.lastDay ? M.spent / M.lastDay : 0;
+    let big = 0, bigD = 0; Object.entries(M.days).forEach(([d, v]) => { if (v.total > big) { big = v.total; bigD = +d; } });
+    const range = M.lastDay ? MONTHS[M.m - 1].slice(0, 3) + " 1–" + M.lastDay : "no days yet";
+    $("summary").innerHTML =
+      `<div><span class="label">Spent this month</span><span class="big">${money(M.spent)}</span><span class="sub">${M.billSpent ? (S.noBills ? "not counting " + money(M.billSpent) + " in monthly bills" : money(M.billSpent) + " was monthly bills") : "&nbsp;"}</span></div>` +
+      `<div><span class="label">Per day</span><span class="big">${money(avg)}</span><span class="sub">average, ${range}</span></div>` +
+      `<div><span class="label">Biggest day</span><span class="big">${big ? money(big) : "—"}</span><span class="sub">${bigD ? WD[new Date(M.y, M.m - 1, bigD).getDay()] + " the " + ord(bigD) : "&nbsp;"}</span></div>`;
 
-        {/* Time & Account Filters — show on Transactions & Breakdown */}
-        {(tab === 0 || tab === 1) && (
-          <div style={{ background: p.surface, borderBottom: `1px solid ${p.border}`, padding: "10px 16px" }}>
-            {tab === 0 && (
-              <div style={{ marginBottom: 10, position: "relative" }}>
-                <input placeholder="Search transactions... (bypasses all filters)" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} style={{ paddingRight: searchQuery ? 32 : 12, fontSize: 13 }} />
-                {searchQuery && <button onClick={() => setSearchQuery("")} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: p.muted, fontSize: 18, cursor: "pointer" }}>×</button>}
-                {searchQuery && <div style={{ fontSize: 10, color: p.muted, marginTop: 3 }}>Keyword search active — other filters still apply</div>}
-              </div>
-            )}
-            {/* View selector */}
-            <div style={{ display: "flex", gap: 6, overflowX: "auto", marginBottom: 8 }}>
-              {VIEWS.map((v, i) => (
-                <button key={i} className="view-btn" onClick={() => setView(i)}
-                  style={{ background: view === i ? p.accent : "none", borderColor: view === i ? p.accent : p.border, color: view === i ? "#fff" : p.muted }}>
-                  {v}
-                </button>
-              ))}
-            </div>
+    // calendar
+    const first = new Date(M.y, M.m - 1, 1).getDay();
+    let html = "";
+    for (let i = 0; i < first; i++) html += `<div class="cell blank" aria-hidden="true"></div>`;
+    for (let d = 1; d <= M.dim; d++) {
+      const v = M.days[d], ds = S.view + "-" + pad(d);
+      const has = v.items.length > 0;
+      const pct = has && M.maxDay > 0 && v.total > 0 ? Math.round(12 + 78 * Math.sqrt(v.total / M.maxDay)) : 0;
+      const bg = pct ? `style="background:color-mix(in oklab, var(--heat) ${pct}%, var(--cell))"` : "";
+      const expAmt = v.expected.reduce((s, b) => s + b.amount, 0);
+      const cls = ["cell", has ? "" : "nodata", v.total < 0 ? "neg" : "", ds === todayStr ? "today" : "", S.sel === d ? "sel" : ""].join(" ");
+      const lbl = `${MONTHS[M.m - 1]} ${d}: ${has ? money(v.total) : "nothing"}${v.ret ? ", " + money(v.ret) + " returned" : ""}${expAmt ? ", " + money(expAmt) + " expected" : ""}`;
+      html += `<button class="${cls}" data-day="${d}" ${bg} aria-label="${lbl}"><span class="dn">${d}</span>${has ? `<span class="amt">${short(v.total)}</span>` : "<span></span>"}${v.ret ? `<span class="ret">↩${short(v.ret)}</span>` : ""}${expAmt ? `<span class="exp">+${short(expAmt)}</span>` : ""}</button>`;
+    }
+    $("grid").innerHTML = html;
+    $("moneyin").innerHTML = `<span>Total income</span><span class="num">${money(M.income)}</span><span>Returns</span><span class="num ret-n">${money(M.returns)}</span><span class="cap">Not counted in spending</span>`;
+    $("reportBtn").setAttribute("aria-pressed", String(S.report));
+    renderReport(M);
+    renderSnaps(M);
 
-            {/* Month picker */}
-            {view === 0 && (
-              <div style={{ display: "flex", gap: 8 }}>
-                <select value={selMonth} onChange={e => setSelMonth(+e.target.value)} style={{ flex: 1 }}>
-                  {Array.from({ length: 12 }, (_, i) => <option key={i} value={i}>{monthName(i)}</option>)}
-                </select>
-                <select value={selYear} onChange={e => setSelYear(+e.target.value)} style={{ flex: 1 }}>
-                  {years.map(y => <option key={y}>{y}</option>)}
-                </select>
-              </div>
-            )}
+    renderChecks(M);
+    renderPanel(M);
+    renderUpload();
+    renderBills();
+  }
 
-            {/* Year picker */}
-            {view === 1 && (
-              <select value={selYear} onChange={e => setSelYear(+e.target.value)}>
-                {years.map(y => <option key={y}>{y}</option>)}
-              </select>
-            )}
+  function renderChecks(M) {
+    const thru = {}; let unassigned = 0;
+    let hasCash = false, hasBills = false;
+    M.allTx.forEach(t => {
+      if (t.acct === "Cash") hasCash = true;
+      if (t.acct === "Bills") hasBills = true;
+      if (t.acct === "Unassigned") { unassigned++; return; }
+      const d = +t.date.slice(8, 10); thru[t.acct] = Math.max(thru[t.acct] || 0, d);
+    });
+    const n = S.accts.filter(a => thru[a.name]).length, total = S.accts.length;
+    const mon = MONTHS[M.m - 1];
+    let h = `<div class="checks-head"><span class="label">${mon} statements</span>
+      <span class="row"><span class="count${n === total && total ? " done" : ""}">${n} of ${total} in</span>
+      ${M.filtering ? `<button class="chip" data-act="showAll" aria-pressed="true">Show all</button>` : ""}<button class="chip" data-act="editAccts" aria-pressed="${S.editAccts}">${S.editAccts ? "Done" : "Edit list"}</button></span></div><div class="chiprow">`;
+    h += S.accts.map(a => {
+      const has = thru[a.name];
+      if (S.editAccts) return `<button class="acct editing" data-act="rmAcct" data-acct="${esc(a.name)}" style="--c:var(--k${a.c})" aria-label="Remove ${esc(a.name)} from the list"><span class="box">×</span>${esc(a.name)}</button>`;
+      const off = has && S.hidden.includes(a.name);
+      if (has) return `<button class="acct ${off ? "hiddenacct" : "in"}" data-act="toggleAcct" data-acct="${esc(a.name)}" style="--c:var(--k${a.c})" aria-pressed="${!off}" aria-label="${esc(a.name)}, through the ${ord(has)}: ${off ? "hidden. Tap to show" : "showing. Tap to hide"}">
+        <span class="box">${off ? "" : "✓"}</span>${esc(a.name)}<span class="thru">${off ? "hidden" : "thru " + mon.slice(0, 3) + " " + has}</span></button>`;
+      return `<button class="acct missing" data-act="upFor" data-acct="${esc(a.name)}" style="--c:var(--k${a.c})" aria-label="${esc(a.name)}: not uploaded yet. Tap to upload">
+        <span class="box"></span>${esc(a.name)}<span class="thru">tap to upload</span></button>`;
+    }).join("");
+    if (hasCash && !S.editAccts) { const off = S.hidden.includes("Cash"); h += `<button class="acct ${off ? "hiddenacct" : "in"}" data-act="toggleAcct" data-acct="Cash" style="--c:var(--c-cash)" aria-pressed="${!off}"><span class="box">${off ? "" : "✓"}</span>Cash<span class="thru">${off ? "hidden" : ""}</span></button>`; }
+    if (hasBills && !S.editAccts) { const off = S.hidden.includes("Bills"); h += `<button class="acct ${off ? "hiddenacct" : "in"}" data-act="toggleAcct" data-acct="Bills" style="--c:var(--accent)" aria-pressed="${!off}"><span class="box">${off ? "" : "✓"}</span>Bank bills<span class="thru">${off ? "hidden" : "automatic"}</span></button>`; }
+    if (unassigned) h += `<button class="acct unassigned" data-act="toUpload"><span class="box">?</span>${unassigned} from an unknown card</button>`;
+    if (!S.editAccts && !S.adding) h += `<button class="acct add" data-act="addAcct"><span class="box">+</span>Add a card</button>`;
+    h += `</div>`;
+    if (S.adding) h += `<form class="addacct" id="addAcctForm"><input type="text" id="newAcct" placeholder="Card name, like Safeway" aria-label="New card name" maxlength="24"><button class="btn" type="submit">Add</button><button class="btn ghost" type="button" data-act="cancelAdd">Cancel</button></form>`;
+    if (S.editAccts) h += `<p class="note" style="margin:0">Tap a card to take it off the list. Its transactions stay on the calendar.</p>`;
+    else if (M.filtering) h += `<p class="note" style="margin:0">Showing only the checked cards. Totals, the calendar and the report count just those. Tap a card to show or hide it.</p>`;
+    else if (n) h += `<p class="note" style="margin:0">Tap a checked card to hide its spending. To add another file for a card, use Add statements below.</p>`;
+    $("checks").innerHTML = h;
+  }
 
-            {/* Custom range */}
-            {view === 2 && (
-              <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", gap: 8, alignItems: "center" }}>
-                <input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)} />
-                <span style={{ color: p.muted, fontSize: 13 }}>→</span>
-                <input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)} />
-              </div>
-            )}
+  function txRow(t, M) {
+    const isBill = M.billKeys.has(t.key);
+    const kindTxt = t.assumed ? "paid from the bank, counted automatically" : { payment: "card payment or transfer", income: "income", refund: "return · not counted" }[t.kind];
+    const actions = t.acct === "Cash"
+      ? `<button class="chip" data-act="del" data-id="${t.id}">Remove</button>`
+      : `<button class="chip" data-act="count" data-id="${t.id}">${t.counted ? "Don't count" : "Count it"}</button>`;
+    const billBtn = t.counted && t.amount > 0 ? `<button class="chip" data-act="bill" data-id="${t.id}" aria-pressed="${isBill}">↻ Monthly</button>` : "";
+    return `<div class="tx${t.counted || t.kind === "refund" ? "" : " off"}">
+      <span class="dot" style="--c:${acctColor(t.acct)}"></span>
+      <div><div class="tx-name">${esc(t.name)}</div><div class="tx-sub">${esc(t.acct)}${kindTxt ? " · " + kindTxt : ""}${t.acct !== "Cash" && t.desc !== t.name ? " · " + esc(t.desc) : ""}</div></div>
+      <div class="tx-amt${t.amount < 0 ? " neg" : ""}">${money(t.amount)}</div>
+      ${t.ro ? "" : `<div class="tx-act">${billBtn}${actions}</div>`}</div>`;
+  }
 
-            {/* Account filter */}
-            <div style={{ marginTop: 8 }}>
-              <select value={filterAccount} onChange={e => setFilterAccount(e.target.value)}>
-                <option value="all">All Accounts</option>
-                {ACCOUNTS.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-              </select>
-            </div>
+  function renderPanel(M) {
+    const p = $("panel");
+    if (!S.sel || !M.days[S.sel]) {
+      const ranked = Object.entries(M.days).filter(([, v]) => v.total > 0).sort((a, b) => b[1].total - a[1].total).slice(0, 6);
+      if (!ranked.length) {
+        p.innerHTML = `<h3>Nothing for ${MONTHS[M.m - 1]} yet</h3><p class="empty">Add your statement CSVs below. Each day on the calendar will fill in with what you spent, and you can tap a day to see the purchases. You can also tap any day to log cash.</p>`;
+        return;
+      }
+      const top = ranked[0][1].total;
+      p.innerHTML = `<h3>Biggest days in ${MONTHS[M.m - 1]}</h3><p class="empty" style="margin:0">Tap a day on the calendar, or one of these, to see what it was.</p><div class="biglist">` +
+        ranked.map(([d, v]) => `<button data-day="${d}"><span>${WD[new Date(M.y, M.m - 1, +d).getDay()].slice(0, 3)} ${MONTHS[M.m - 1].slice(0, 3)} ${d}<div class="bar" style="width:${Math.max(6, Math.round(100 * v.total / top))}%"></div></span><span class="num">${money(v.total)}</span></button>`).join("") + `</div>`;
+      return;
+    }
+    const d = S.sel, v = M.days[d];
+    const items = v.items.slice().sort((a, b) => b.amount - a.amount);
+    let h = `<div class="dayhead"><h3>${WD[new Date(M.y, M.m - 1, d).getDay()]}, ${MONTHS[M.m - 1].slice(0, 3)} ${d}</h3><span class="total">${money(v.total)}</span></div>`;
+    h += `<div class="txlist">`;
+    if (!items.length && !v.expected.length && !v.returns.length && !v.billItems.length) h += `<p class="empty">No spending on this day.</p>`;
+    h += items.map(t => txRow(t, M)).join("");
+    h += v.expected.map(b => `<div class="tx expected"><span class="dot"></span><div><div class="tx-name">${esc(b.name)}</div><div class="tx-sub">expected monthly bill · hasn't shown up yet</div></div><div class="tx-amt">~${money(b.amount)}</div></div>`).join("");
+    h += `</div>`;
+    if (v.billItems.length) h += `<div><span class="label">Monthly bills · ${money(v.billTotal)} left out of this day</span><div class="txlist">${v.billItems.map(t => txRow(t, M).replace('class="tx"', 'class="tx leftout"')).join("")}</div></div>`;
+    if (v.returns.length) h += `<div><span class="label">Returns this day · ${money(v.ret)} back</span><div class="txlist">${v.returns.map(t => txRow(t, M)).join("")}</div></div>`;
+    if (v.off.length) h += `<details class="sub"><summary>Not counted (${v.off.length})</summary><div class="txlist">${v.off.map(t => txRow(t, M)).join("")}</div></details>`;
+    if (!M.snap) h += `<form class="cash" id="cashForm"><input type="number" id="cashAmt" step="0.01" min="0" inputmode="decimal" placeholder="$0.00" aria-label="Cash amount"><input type="text" id="cashNote" placeholder="What was it? (optional)" aria-label="Cash note"><button class="btn" type="submit">Add cash</button></form>`;
+    h += `<button class="chip" data-act="close" style="align-self:flex-start">← Back to biggest days</button>`;
+    p.innerHTML = h;
+  }
 
-            {/* Tag filter */}
-            <div style={{ marginTop: 8 }}>
-              <select value={filterTag} onChange={e => setFilterTag(e.target.value)}>
-                <option value="all">All Tags</option>
-                {TAGS.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
-              </select>
-            </div>
+  function renderUpload() {
+    const real = S.sample ? 0 : S.txns.length;
+    $("uploadNote").textContent = real ? real + " transactions loaded" : "";
+    if (!real && !S.uploadTouched) $("uploadSec").open = true;
+    $("files").innerHTML = S.files.map(f => f.err
+      ? `<div class="f err"><span><strong>${esc(f.name)}</strong> · ${esc(f.err)}</span></div>`
+      : `<div class="f"${f.needs ? ' style="outline:1.5px solid var(--c-other)"' : ""}>${f.needs ? `<div class="pick"><strong>Which card is this?</strong>${S.accts.map(a => `<button class="chip" data-act="assign" data-id="${f.id}" data-acct="${esc(a.name)}">${esc(a.name)}</button>`).join("")}${f.last4 ? `<span class="note">ends in ${f.last4}, it'll be remembered</span>` : ""}</div>` : ""}<span><strong>${esc(f.acct || "Unknown card")}</strong> <span class="note">${esc(f.name)}</span><br>${f.spend} purchase${f.spend === 1 ? "" : "s"}${f.refunds ? ", " + f.refunds + " refund" + (f.refunds === 1 ? "" : "s") : ""}${f.skipped ? ", " + f.skipped + " not counted (payments, transfers, money in)" : ""}${f.dups ? ", " + f.dups + " duplicates skipped" : ""}</span>${f.text ? `<button class="chip" data-act="flip" data-id="${f.id}">${f.flip ? "Undo flip" : "Amounts backwards? Flip"}</button>` : ""}</div>`).join("");
+    const ca = $("clearArea");
+    if (!real) { ca.innerHTML = ""; return; }
+    const months = [...new Set(S.txns.map(t => t.date.slice(0, 7)))].sort();
+    const names = months.map(ym => MONTHS[+ym.slice(5) - 1]).join(" and ");
+    ca.innerHTML = S.confirmClear
+      ? `<div class="confirm"><span>Clear all ${real} transactions? Save a snapshot of ${esc(names)} first so you can look back at it. Your bills and cards stay saved either way.</span><button class="btn" data-act="clearSave">Save snapshot and clear</button><button class="btn danger" data-act="clearYes">Clear without saving</button><button class="btn ghost" data-act="clearNo">Cancel</button></div>`
+      : `<div class="row"><button class="btn ghost" data-act="clear">Done with this month · clear transactions</button></div>`;
+  }
 
-            {/* Credits toggle */}
-            <div style={{ marginTop: 8 }}>
-              <button onClick={() => { setShowCreditsOnly(s => !s); setFilterMin(""); setFilterMax(""); setShowUntaggedOnly(false); }}
-                style={{ width: "100%", padding: "8px", borderRadius: 8, border: `1px solid ${showCreditsOnly ? p.green : p.border}`, background: showCreditsOnly ? p.green+"22" : "none", color: showCreditsOnly ? p.green : p.muted, fontSize: 13, fontWeight: showCreditsOnly ? 600 : 400 }}>
-                {showCreditsOnly ? "Showing Credits Only — tap to clear" : "Show Credits Only"}
-              </button>
-            </div>
+  function reportData(M) {
+    const mon = MONTHS[M.m - 1];
+    const rows = [];
+    for (let d = 1; d <= M.dim; d++) {
+      const v = M.days[d];
+      if (!v.items.length && !v.returns.length) continue;
+      rows.push({ d, wd: WD[new Date(M.y, M.m - 1, d).getDay()].slice(0, 3), total: v.total, items: v.items.slice().sort((a, b) => b.amount - a.amount), returns: v.returns });
+    }
+    const thru = {}; M.allTx.forEach(t => { if (t.acct !== "Unassigned" && t.acct !== "Cash" && t.acct !== "Bills") thru[t.acct] = Math.max(thru[t.acct] || 0, +t.date.slice(8, 10)); });
+    const cards = S.accts.map(a => ({ name: a.name, thru: thru[a.name] || 0 }));
+    Object.keys(thru).forEach(n => { if (!cards.some(c => c.name === n)) cards.push({ name: n, thru: thru[n] }); });
+    const shown = M.filtering ? cards.filter(c => c.thru && !S.hidden.includes(c.name)).map(c => c.name) : [];
+    return { title: `${mon} ${M.y} spending${M.filtering ? " (" + (shown.join(", ") || "no cards") + " only)" : ""}`, mon, rows, cards, avg: M.lastDay ? M.spent / M.lastDay : 0 };
+  }
+  function reportInner(M, R) {
+    const card = c => c.thru ? `${esc(c.name)} ✓ (thru ${R.mon.slice(0, 3)} ${c.thru})` : `${esc(c.name)}: not included`;
+    return `<h3>${esc(R.title)}</h3>
+      <table class="sumtable"><tbody>
+        <tr><td>Spent</td><td class="n">${money(M.spent)}</td></tr>
+        <tr><td>Average per day</td><td class="n">${money(R.avg)}</td></tr>
+        <tr><td>Monthly bills (${S.noBills ? "left out of spent" : "part of spent"})</td><td class="n">${money(M.billSpent)}</td></tr>
+        <tr><td>Returns (not counted)</td><td class="n">${money(M.returns)}</td></tr>
+        <tr><td>Total income (not counted)</td><td class="n">${money(M.income)}</td></tr>
+      </tbody></table>
+      <p class="note" style="margin:0">Cards: ${R.cards.map(card).join(" · ")}</p>
+      <div class="tablewrap"><table><thead><tr><th>Day</th><th>What</th><th style="text-align:right">Spent</th></tr></thead><tbody>
+      ${R.rows.map(r => `<tr><td style="white-space:nowrap">${r.wd} ${R.mon.slice(0, 3)} ${r.d}</td><td class="items">${r.items.map(t => `${esc(t.name)} ${money(t.amount)}`).join(", ")}${r.returns.length ? `${r.items.length ? "<br>" : ""}Returned: ${r.returns.map(t => `${esc(t.name)} ${money(Math.abs(t.amount))}`).join(", ")}` : ""}</td><td class="n">${money(r.total)}</td></tr>`).join("")}
+      </tbody></table></div>`;
+  }
+  function renderReport(M) {
+    const el = $("report");
+    el.hidden = !S.report;
+    if (!S.report) return;
+    const R = reportData(M);
+    el.innerHTML = reportInner(M, R) + `<div class="row"><button class="btn" data-act="saveReport">Save printable copy</button><button class="btn ghost" data-act="copyReport">Copy as text</button><button class="chip" data-act="closeReport">Close</button><span class="note" id="reportMsg"></span></div>
+      <p class="note" style="margin:0">The printable copy is a file you open in your browser; it brings up the print window when it opens.</p>`;
+  }
+  function reportText(M) {
+    const R = reportData(M);
+    const L = [R.title, "", "Spent: " + money(M.spent), "Average per day: " + money(R.avg), "Monthly bills (" + (S.noBills ? "left out of spent" : "part of spent") + "): " + money(M.billSpent), "Returns (not counted): " + money(M.returns), "Total income (not counted): " + money(M.income), "",
+      "Cards: " + R.cards.map(c => c.thru ? `${c.name} (thru ${R.mon.slice(0, 3)} ${c.thru})` : `${c.name}: not included`).join(", "), ""];
+    R.rows.forEach(r => {
+      L.push(`${r.wd} ${R.mon.slice(0, 3)} ${r.d}  ${money(r.total)}`);
+      r.items.forEach(t => L.push(`   ${t.name}  ${money(t.amount)}  (${t.acct})`));
+      r.returns.forEach(t => L.push(`   Returned: ${t.name}  ${money(Math.abs(t.amount))}`));
+    });
+    return L.join("\n");
+  }
+  function copyReport() {
+    const txt = reportText(monthModel());
+    const msg = m => { const e = $("reportMsg"); if (e) e.textContent = m; };
+    const fallback = () => { $("restoreText").value = txt; msg("Couldn't copy here. The text is in the backup box under Monthly bills."); };
+    try { navigator.clipboard.writeText(txt).then(() => msg("Copied."), fallback); } catch (e) { fallback(); }
+  }
+  async function saveReport() {
+    const M = monthModel(), R = reportData(M);
+    const msg = m => { const e = $("reportMsg"); if (e) e.textContent = m; };
+    const doc = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(R.title)}</title><style>
+      body{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;color:#1d221f;margin:32px;font-size:13px}
+      h3{font-size:22px;margin:0 0 12px}table{border-collapse:collapse;width:100%;margin:10px 0}td,th{text-align:left;padding:5px 8px;border-bottom:1px solid #ccc;vertical-align:top}
+      th{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#666}.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}.items{color:#444}.note{color:#555}
+      .sumtable{width:auto;min-width:320px}tr{break-inside:avoid}@page{margin:14mm}
+      </style></head><body>${reportInner(M, R)}<script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script></body></html>`;
+    let dl = null;
+    try { dl = await window.claude?.use?.("downloads"); } catch (e) {}
+    if (!dl) {
+      // Running on its own (e.g. GitHub Pages): save with a normal browser download
+      try {
+        const url = URL.createObjectURL(new Blob([doc], { type: "text/html" }));
+        const link = document.createElement("a");
+        link.href = url; link.download = `Day by Day ${R.mon} ${M.y}.html`;
+        document.body.appendChild(link); link.click(); link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+        msg("Saved. Open the file to print it.");
+      } catch (e) { msg("Couldn't save the file. Use Copy as text instead."); }
+      return;
+    }
+    try { await dl.save({ filename: `Day by Day ${R.mon} ${M.y}.html`, data: doc }); msg("Saved. Open the file to print it."); }
+    catch (e) { msg(e && e.code === "declined" ? "" : "Couldn't save the file. Use Copy as text instead."); }
+  }
+  function renderSnaps(M) {
+    const list = Object.values(S.snaps).sort((a, b) => b.ym.localeCompare(a.ym));
+    $("snapNote").textContent = list.length ? list.length + " saved" : "";
+    const live = !S.sample && S.txns.some(t => t.date.startsWith(S.view));
+    $("snapNow").innerHTML = live ? `<button class="btn ghost" data-act="snapNow">${S.snaps[S.view] ? "Update" : "Save"} snapshot of ${MONTHS[M.m - 1]} now</button>` : "";
+    $("snaps").innerHTML = list.length ? list.map(sn => {
+      const [y, m] = sn.ym.split("-").map(Number);
+      const spent = sn.txns.filter(t => t.kind === "spend").reduce((s, t) => s + t.amount, 0);
+      const confirm = S.confirmDelSnap === sn.ym;
+      return `<div class="b"><span><strong>${MONTHS[m - 1]} ${y}</strong> <span class="note">saved ${esc(niceDate(sn.savedAt))}</span></span><span class="row"><span class="num">${money(spent)}</span><button class="chip" data-act="viewSnap" data-ym="${sn.ym}">View</button><button class="chip" data-act="delSnap" data-ym="${sn.ym}"${confirm ? ' style="color:var(--warn);border-color:var(--warn)"' : ""}>${confirm ? "Tap again to delete" : "Delete"}</button></span></div>`;
+    }).join("") : `<p class="empty" style="margin:0">No saved months yet. When you clear a month's transactions, you'll be asked to save a snapshot first.</p>`;
+  }
 
-            {/* Untagged filter */}
-            <div style={{ marginTop: 8 }}>
-              <button onClick={() => { setShowUntaggedOnly(s => !s); setShowCreditsOnly(false); }}
-                style={{ width: "100%", padding: "8px", borderRadius: 8, border: `1px solid ${showUntaggedOnly ? "#f39c12" : p.border}`, background: showUntaggedOnly ? "#f39c1222" : "none", color: showUntaggedOnly ? "#f39c12" : p.muted, fontSize: 13, fontWeight: showUntaggedOnly ? 600 : 400 }}>
-                {showUntaggedOnly ? `Showing Untagged Only (${allTxns.filter(t=>!t.tag||t.tag==="untagged").length}) — tap to clear` : `Show Untagged Only (${allTxns.filter(t=>!t.tag||t.tag==="untagged").length})`}
-              </button>
-            </div>
+  function renderBills() {
+    const bl = bills().slice().sort((a, b) => a.day - b.day);
+    const tot = bl.reduce((s, b) => s + b.amount, 0);
+    const sg = suggestions();
+    $("billsNote").textContent = (bl.length ? bl.length + " saved · about " + money(tot) + "/mo" : "") + (sg.length ? (bl.length ? " · " : "") + sg.length + " suggested" : "");
+    const sn = $("sugNote");
+    sn.hidden = !sg.length;
+    if (sg.length) sn.innerHTML = `<span>${sg.length === 1 ? "1 charge looks" : sg.length + " charges look"} like a monthly bill. They show up once a month in more than one month.</span><button class="chip" data-act="toSugs">Review</button>`;
+    $("sugs").innerHTML = `<div><span class="label">Suggested monthly bills</span>` + (sg.length
+      ? sg.map(x => `<div class="sug"><span><strong>${esc(x.name)}</strong> <span class="note">around the ${ord(x.day)} · seen ${x.n} months</span></span><span class="row"><span class="num">~${money(x.amount)}</span><button class="chip" data-act="addSug" data-key="${esc(x.key)}">Add</button><button class="chip" data-act="noSug" data-key="${esc(x.key)}">Not a bill</button></span></div>`).join("")
+      : `<p class="note" style="margin:4px 0 0">Once you have two or more months saved, charges that show up once a month around the same day will be suggested here.</p>`) + `</div>`;
+    $("bills").innerHTML = bl.length ? bl.map(b => `<div class="b"><span><strong>${esc(b.name)}</strong> <span class="note">${b.assumed ? "from the bank · counted on the " + ord(b.day) : "on a card · around the " + ord(b.day)}</span></span><span class="row"><span class="num">~${money(b.amount)}</span><button class="chip" data-act="unbill" data-key="${esc(b.key)}" aria-label="Forget ${esc(b.name)}">Forget</button></span></div>`).join("")
+      : `<p class="empty" style="margin:0">No monthly bills saved yet.</p>`;
+  }
 
-            {/* Amount range filter */}
-            <div style={{ marginTop: 8 }}>
-              <div style={{ fontSize: 10, color: p.muted, marginBottom: 4, textTransform: "uppercase", letterSpacing: ".5px", fontWeight: 600 }}>Amount Range</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", gap: 6, alignItems: "center" }}>
-                <input type="number" placeholder="$ Min" value={filterMin} onChange={e => setFilterMin(e.target.value)} style={{ padding: "6px 8px", fontSize: 13 }} />
-                <span style={{ color: p.muted, fontSize: 13, textAlign: "center" }}>–</span>
-                <input type="number" placeholder="$ Max" value={filterMax} onChange={e => setFilterMax(e.target.value)} style={{ padding: "6px 8px", fontSize: 13 }} />
-              </div>
-              {(filterMin || filterMax) && (
-                <button onClick={() => { setFilterMin(""); setFilterMax(""); }} style={{ marginTop: 4, background: "none", border: "none", color: p.muted, fontSize: 11, textDecoration: "underline" }}>Clear range</button>
-              )}
-            </div>
-          </div>
-        )}
+  // ---------- actions ----------
+  function toggleBill(t) {
+    const list = bills(); const i = list.findIndex(b => b.key === t.key);
+    if (i >= 0) list.splice(i, 1);
+    else list.push({ key: t.key, name: t.name, amount: Math.round(t.amount * 100) / 100, day: +t.date.slice(8, 10) });
+    save(); render();
+  }
+  function shiftMonth(n) {
+    let [y, m] = S.view.split("-").map(Number); m += n;
+    if (m < 1) { m = 12; y--; } if (m > 12) { m = 1; y++; }
+    S.view = y + "-" + pad(m); S.sel = null; render();
+  }
 
-        <div style={{ padding: "14px 16px", maxWidth: 600, margin: "0 auto" }}>
+  document.addEventListener("click", e => {
+    const dayBtn = e.target.closest("[data-day]");
+    if (dayBtn) { const d = +dayBtn.dataset.day; S.sel = S.sel === d && dayBtn.classList.contains("cell") ? null : d; render(); if (window.innerWidth <= 820 && S.sel) $("panel").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "nearest" }); return; }
+    const a = e.target.closest("[data-act]"); if (!a) return;
+    const act = a.dataset.act, t = a.dataset.id && S.txns.find(x => x.id === a.dataset.id);
+    if (act === "bill" && t) toggleBill(t);
+    else if (act === "count" && t) { t.counted = !t.counted; t.user = true; save(); render(); }
+    else if (act === "del" && t) { S.txns = S.txns.filter(x => x !== t); save(); render(); }
+    else if (act === "close") { S.sel = null; render(); }
+    else if (act === "flip") flipFile(a.dataset.id);
+    else if (act === "clear") { S.confirmClear = true; render(); }
+    else if (act === "clearNo") { S.confirmClear = false; render(); }
+    else if (act === "clearSave") { [...new Set(S.txns.map(t => t.date.slice(0, 7)))].forEach(snapshotMonth); S.txns = []; S.files = []; S.confirmClear = false; S.sel = null; save(); render(); }
+    else if (act === "snapNow") { snapshotMonth(S.view); render(); }
+    else if (act === "viewSnap") { S.view = a.dataset.ym; S.sel = null; render(); window.scrollTo({ top: 0 }); }
+    else if (act === "delSnap") { if (S.confirmDelSnap === a.dataset.ym) { delete S.snaps[a.dataset.ym]; S.confirmDelSnap = ""; saveSnaps(); } else S.confirmDelSnap = a.dataset.ym; render(); }
+    else if (act === "saveReport") saveReport(a);
+    else if (act === "copyReport") copyReport();
+    else if (act === "closeReport") { S.report = false; render(); }
+    else if (act === "clearYes") { S.txns = []; S.files = []; S.confirmClear = false; S.sel = null; save(); render(); }
+    else if (act === "toggleAcct") { const n = a.dataset.acct; S.hidden = S.hidden.includes(n) ? S.hidden.filter(x => x !== n) : S.hidden.concat(n); S.sel = null; render(); }
+    else if (act === "showAll") { S.hidden = []; render(); }
+    else if (act === "upFor") { S.pendingAcct = a.dataset.acct; $("cardInput").click(); }
+    else if (act === "assign") assignFile(a.dataset.id, a.dataset.acct);
+    else if (act === "editAccts") { S.editAccts = !S.editAccts; S.adding = false; render(); }
+    else if (act === "rmAcct") { S.accts = S.accts.filter(x => x.name !== a.dataset.acct); saveCfg(); render(); }
+    else if (act === "addAcct") { S.adding = true; render(); const i = $("newAcct"); if (i) i.focus(); }
+    else if (act === "cancelAdd") { S.adding = false; render(); }
+    else if (act === "toUpload") { $("uploadSec").open = true; $("uploadSec").scrollIntoView({ block: "start" }); }
+    else if (act === "addSug") { const x = suggestions().find(z => z.key === a.dataset.key); if (x) { bills().push({ key: x.key, name: x.name, amount: x.amount, day: x.day }); save(); render(); } }
+    else if (act === "noSug") { S.dismissed.push(a.dataset.key); saveDismissed(); render(); }
+    else if (act === "toSugs") { $("billsSec").open = true; $("sugs").scrollIntoView({ block: "center" }); }
+    else if (act === "unbill") { const list = bills(); const i = list.findIndex(b => b.key === a.dataset.key); if (i >= 0) list.splice(i, 1); save(); render(); }
+  });
+  document.addEventListener("submit", e => {
+    if (e.target.id === "addAcctForm") {
+      e.preventDefault();
+      if (addAcct($("newAcct").value)) { S.adding = false; render(); }
+      else $("newAcct").focus();
+      return;
+    }
+    if (e.target.id === "addBillForm") {
+      e.preventDefault();
+      const name = $("billName").value.trim(), amt = parseFloat($("billAmt").value), day = parseInt($("billDay").value, 10);
+      if (!name) { $("billName").focus(); return; }
+      if (!(amt > 0)) { $("billAmt").focus(); return; }
+      if (!(day >= 1 && day <= 31)) { $("billDay").focus(); return; }
+      const b = { key: keyOf(name) || name.toUpperCase(), name, amount: Math.round(amt * 100) / 100, day, assumed: true };
+      [S.bills].concat(S.sample ? [S.sampleBills] : []).forEach(list => { const i = list.findIndex(x => x.key === b.key); if (i >= 0) list.splice(i, 1); list.push(b); });
+      save(); $("billName").value = ""; $("billAmt").value = ""; $("billDay").value = "";
+      $("billMsg").textContent = `Added ${name}, ${money(b.amount)} on the ${ord(day)}.`;
+      render(); return;
+    }
+    if (e.target.id !== "cashForm") return;
+    e.preventDefault();
+    const amt = parseFloat($("cashAmt").value);
+    if (!(amt > 0)) { $("cashAmt").focus(); return; }
+    const note = $("cashNote").value.trim() || "Cash";
+    if (S.sample) { S.sample = false; S.txns = []; S.files = []; }
+    const date = S.view + "-" + pad(S.sel);
+    S.txns.push({ id: uid(), fileId: "cash", acct: "Cash", date, desc: note, raw: amt, name: note, key: keyOf(note), amount: amt, kind: "spend", counted: true });
+    save(); render();
+  });
+  $("reportBtn").onclick = () => { S.report = !S.report; render(); if (S.report) $("report").scrollIntoView({ block: "start" }); };
+  $("noBills").addEventListener("change", e => { S.noBills = e.target.checked; try { localStorage.setItem(K_NOBILLS, S.noBills ? "1" : "0"); } catch (err) {} render(); });
+  $("prev").onclick = () => shiftMonth(-1);
+  $("next").onclick = () => shiftMonth(1);
+  $("uploadSec").addEventListener("toggle", () => { S.uploadTouched = true; });
+  $("fileInput").addEventListener("change", e => { handleFiles(e.target.files); e.target.value = ""; });
+  $("cardInput").addEventListener("change", e => { handleFiles(e.target.files, S.pendingAcct); e.target.value = ""; S.pendingAcct = ""; });
+  const drop = $("drop");
+  ["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+  ["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
+  drop.addEventListener("drop", e => handleFiles(e.dataTransfer.files));
 
-          {/* TRANSACTIONS */}
-          {tab === 0 && (
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                <div style={{ fontSize: 12, color: p.muted }}>
-                  {filtered.length} transactions · {fmt(filtered.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0))} spent
-                </div>
-                {filtered.length > 0 && (searchQuery.trim() || filterTag !== "all" || filterAccount !== "all") && (
-                  <button onClick={() => setSearchBulkModal({ matches: filtered })}
-                    style={{ fontSize: 12, padding: "5px 12px", borderRadius: 6, border: `1px solid ${p.accent}`, background: p.accent+"22", color: p.accent, cursor: "pointer", fontWeight: 600, whiteSpace: "nowrap" }}>
-                    Tag all {filtered.length}
-                  </button>
-                )}
-              </div>
-              {!txnsLoaded && <div style={{ textAlign: "center", color: p.muted, padding: "40px 0" }}>Loading…</div>}
-              {txnsLoaded && filtered.length === 0 && (
-                <div style={{ textAlign: "center", padding: "40px 0" }}>
-                  <div style={{ fontSize: 36, marginBottom: 8 }}>💳</div>
-                  <div style={{ color: p.muted, fontSize: 14 }}>No transactions for this period</div>
-                  <div style={{ color: p.muted, fontSize: 12, marginTop: 4 }}>Upload a CSV or add a cash transaction</div>
-                </div>
-              )}
-              {filtered.map(t => (
-                <TxnRow key={t.id} txn={t}
-                  expanded={expandedTxnId === t.id}
-                  onToggle={(id) => setExpandedTxnId(prev => prev === id ? null : id)}
-                  onUpdate={(id, changes) => withSync(() => cashTxns.find(c=>c.id===id) ? updateCash(id, changes) : updateTxn(id, changes))}
-                  onDelete={(id) => withSync(async () => {
-                    const txn = allTxns.find(t => t.id === id);
-                    if (!txn) return;
-                    // Move to trash
-                    await saveToTrash({ ...txn, deletedAt: new Date().toISOString() });
-                    // Remove from source
-                    if (cashTxns.find(c => c.id === id)) await deleteCash(id);
-                    else await deleteTxn(id);
-                  })}
-                  onApplyToAll={(desc, tag, exceptId, isRetag) => {
-                    const root = cleanMerchant(desc);
-                    const tagLabel = TAGS.find(t=>t.id===tag)?.label;
-                    const matches = allTxns.filter(t =>
-                      t.id !== exceptId &&
-                      merchantMatch(t.description, desc) &&
-                      (isRetag ? true : (!t.tag || t.tag === "untagged"))
-                    );
-                    if (matches.length === 0) return;
-                    setBulkTagModal({ matches, tag, tagLabel, root });
-                  }}
-                />
-              ))}
-            </div>
-          )}
+  $("copyBackup").onclick = () => {
+    const txt = JSON.stringify({ bills: S.bills, accts: S.accts, map: S.map, snaps: S.snaps, notBills: S.dismissed });
+    const ta = $("restoreText");
+    const done = m => { $("copyMsg").textContent = m; };
+    try { navigator.clipboard.writeText(txt).then(() => done("Copied. Paste it somewhere safe."), () => { ta.value = txt; ta.select(); done("Select and copy the text below."); }); }
+    catch (err) { ta.value = txt; ta.select(); done("Select and copy the text below."); }
+  };
+  $("restoreBtn").onclick = () => {
+    try {
+      const raw = JSON.parse($("restoreText").value);
+      const data = Array.isArray(raw) ? { bills: raw } : raw;
+      if (!data || typeof data !== "object" || (!data.bills && !data.snaps && !data.accts)) throw 0;
+      const b = Array.isArray(data.bills) ? data.bills.filter(x => x && x.key && x.name && typeof x.amount === "number" && x.day) : [];
+      const have = new Set(S.bills.map(x => x.key)); let n = 0, c = 0, m = 0;
+      b.forEach(x => { if (!have.has(x.key)) { S.bills.push(x); n++; } });
+      if (Array.isArray(data.accts)) data.accts.forEach(a => { if (a && a.name && !S.accts.some(z => z.name === a.name)) { S.accts.push({ name: a.name, c: a.c || 1 }); c++; } });
+      if (data.map && typeof data.map === "object") Object.assign(S.map, data.map);
+      if (data.snaps && typeof data.snaps === "object") Object.entries(data.snaps).forEach(([k, v]) => { if (v && Array.isArray(v.txns) && !S.snaps[k]) { S.snaps[k] = v; m++; } });
+      try { localStorage.setItem(K_BILLS, JSON.stringify(S.bills)); } catch (e) {}
+      saveCfg(); saveSnaps();
+      $("restoreMsg").textContent = `Restored ${n} bills, ${c} cards and ${m} saved months.`; render();
+    } catch (err) { $("restoreMsg").textContent = "That doesn't look like a backup. Paste the whole text you copied."; }
+  };
 
-          {/* BREAKDOWN */}
-          {tab === 1 && (
-            <div>
-              {/* Breakdown keyword search */}
-              <div style={{ marginBottom: 12, position: "relative" }}>
-                <input
-                  placeholder="Filter breakdown by keyword (e.g. amazon, arco, safeway)..."
-                  value={breakdownSearch}
-                  onChange={e => setBreakdownSearch(e.target.value)}
-                  style={{ fontSize: 13, paddingRight: breakdownSearch ? 32 : 12 }}
-                />
-                {breakdownSearch && (
-                  <button onClick={() => setBreakdownSearch("")}
-                    style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: p.muted, fontSize: 18, cursor: "pointer" }}>×</button>
-                )}
-                {breakdownSearch && (
-                  <div style={{ fontSize: 10, color: p.muted, marginTop: 3 }}>
-                    Showing {breakdownFiltered.length} transactions matching "{breakdownSearch}" — date/account/tag filters still apply
-                  </div>
-                )}
-              </div>
-              <Breakdown txns={breakdownFiltered} />
-            </div>
-          )}
+  // ---------- sample month ----------
+  function makeSample() {
+    const y = +todayStr.slice(0, 4), m = +todayStr.slice(5, 7), ym = y + "-" + pad(m);
+    const upto = Math.max(1, +todayStr.slice(8, 10) - 1);
+    const rows = [
+      [1, "Venture", "PGANDE WEB ONLINE", 186.42], [1, "Savor", "SAFEWAY #1712 SONORA CA", 94.18], [2, "Venture", "ARCO #82831 SONORA CA", 52.07],
+      [3, "Amazon", "AMAZON MKTPL*BB3KD71", 23.99], [4, "Savor", "TST* DIANA'S PIZZA SONORA", 41.5], [5, "Venture", "TRACTOR SUPPLY #2204", 68.4],
+      [6, "Venture", "NETFLIX.COM", 15.49], [8, "Savor", "SAVEMART 609 SONORA CA", 77.31], [9, "Savor", "STARBUCKS STORE 10477", 7.85],
+      [10, "Kohl's", "KOHLS #0612 SONORA CA", 62.66], [11, "Venture", "VERIZON WIRELESS PAYMENTS", 142.0], [12, "Venture", "ARCO #82831 SONORA CA", 48.9],
+      [14, "Venture", "SIMPLISAFE 888-957-4675", 9.99], [15, "Savor", "SAFEWAY #1712 SONORA CA", 131.04], [16, "Savor", "SQ *SONORA FARMERS MKT", 26.0],
+      [17, "Amazon", "AMAZON MKTPL*K29XQ0", 38.47], [18, "Savor", "MOTHER LODE FAIR CAFE", 33.2], [19, "Venture", "HOME DEPOT #6618", 54.12],
+      [20, "Amazon", "AMAZON RETURN", -23.99], [21, "Savor", "SAVEMART 609 SONORA CA", 64.88], [22, "Venture", "ARCO #82831 SONORA CA", 55.6],
+      [23, "Venture", "SPOTIFY USA", 11.99], [24, "Venture", "COSTCO WHSE #0483", 203.55]
+    ].filter(r => r[0] <= upto);
+    const tx = rows.map(([d, acct, desc, amt]) => { const nm = cleanName(desc); return { id: uid(), fileId: "sample", acct, date: ym + "-" + pad(d), desc, raw: amt, name: nm, key: keyOf(nm), amount: amt, kind: amt < 0 ? "refund" : "spend", counted: amt > 0 }; });
+    if (upto >= 3) tx.push({ id: uid(), fileId: "sample", acct: "Savor", date: ym + "-03", desc: "CAPITAL ONE AUTOPAY PYMT", raw: -500, name: "Capital One Autopay Pymt", key: "CAPITAL ONE", amount: -500, kind: "payment", counted: false });
+    const nk = n => keyOf(cleanName(n));
+    S.sampleBills = [
+      { key: nk("PGANDE WEB ONLINE"), name: cleanName("PGANDE WEB ONLINE"), amount: 186.42, day: 1 },
+      { key: nk("NETFLIX.COM"), name: cleanName("NETFLIX.COM"), amount: 15.49, day: 6 },
+      { key: nk("SIMPLISAFE 888-957-4675"), name: cleanName("SIMPLISAFE 888-957-4675"), amount: 9.99, day: 14 },
+      { key: nk("SPOTIFY USA"), name: cleanName("SPOTIFY USA"), amount: 11.99, day: 23 },
+      { key: "WATER DISTRICT", name: "Tuolumne Utilities (water)", amount: 78.0, day: 27 },
+      { key: "PROPANE", name: "Propane delivery", amount: 140.0, day: 29 }
+    ];
+    return tx;
+  }
 
-          {/* ADD CASH */}
-          {tab === 2 && (
-            <div>
-              <div style={{ fontSize: 13, color: p.muted, marginBottom: 14 }}>Log a cash purchase or manual transaction</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                <div><Label>Date</Label><input type="date" value={cashForm.date} onChange={e => setCashForm(p => ({...p, date: e.target.value}))} /></div>
-                <div><Label>Description</Label><input placeholder="What was it?" value={cashForm.description} onChange={e => setCashForm(p => ({...p, description: e.target.value}))} /></div>
-                <div>
-                  <Label>Type</Label>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button onClick={() => setCashForm(p => ({...p, type: "debit"}))}
-                      style={{ flex: 1, padding: "9px", borderRadius: 8, border: `1px solid ${cashForm.type === "debit" ? p.red : p.border}`, background: cashForm.type === "debit" ? p.red+"22" : "none", color: cashForm.type === "debit" ? p.red : p.muted, fontSize: 13, fontWeight: cashForm.type === "debit" ? 700 : 400, cursor: "pointer" }}>
-                      Debit (expense)
-                    </button>
-                    <button onClick={() => setCashForm(p => ({...p, type: "credit"}))}
-                      style={{ flex: 1, padding: "9px", borderRadius: 8, border: `1px solid ${cashForm.type === "credit" ? p.green : p.border}`, background: cashForm.type === "credit" ? p.green+"22" : "none", color: cashForm.type === "credit" ? p.green : p.muted, fontSize: 13, fontWeight: cashForm.type === "credit" ? 700 : 400, cursor: "pointer" }}>
-                      Credit (income)
-                    </button>
-                  </div>
-                </div>
-                <div><Label>Amount ($)</Label><input type="number" placeholder="0.00" step="0.01" value={cashForm.amount} onChange={e => setCashForm(p => ({...p, amount: e.target.value}))} /></div>
-                
-                <div><Label>Tag</Label><TagButtons value={cashForm.tag} onChange={v => setCashForm(p => ({...p, tag: v}))} /></div>
-                <div><Label>Notes</Label><textarea placeholder="Optional notes..." value={cashForm.notes} onChange={e => setCashForm(p => ({...p, notes: e.target.value}))} /></div>
-                <button onClick={async () => {
-                  if (!cashForm.description || !cashForm.amount) return;
-                  await withSync(() => saveCash({
-                    ...cashForm, id: Date.now(), account: "cash",
-                    amount: cashForm.type === "credit" ? -Math.abs(parseFloat(cashForm.amount)) : Math.abs(parseFloat(cashForm.amount))
-                  }));
-                  setCashForm({ date: today(), description: "", amount: "", tag: "untagged", notes: "", type: "debit" });
-                  setTab(0);
-                }} style={{ background: p.accent, color: "#fff", border: "none", borderRadius: 8, padding: "12px", fontSize: 14, fontWeight: 600 }}>
-                  Save Transaction
-                </button>
-              </div>
-            </div>
-          )}
+  // ---------- boot ----------
+  load();
+  $("noBills").checked = S.noBills;
+  if (!S.txns.length) { S.sample = true; S.txns = makeSample(); }
+  const counted = S.txns.map(t => t.date).sort();
+  S.view = counted.length ? counted[counted.length - 1].slice(0, 7) : todayStr.slice(0, 7);
+  render();
+})();
+</script>
 
-          {/* UPLOAD */}
-          {tab === 3 && (
-            <div>
-              <div style={{ marginBottom: 12 }}>
-                <Label>Account — select BEFORE or AFTER dropping file</Label>
-                <select value={uploadAccount} onChange={e => { setUploadAccount(e.target.value); reprocessWithAccount(e.target.value); }}
-                  style={{ borderColor: ACCOUNTS.find(a=>a.id===uploadAccount)?.color, borderWidth: 2 }}>
-                  {ACCOUNTS.filter(a => a.id !== "cash").map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                </select>
-              </div>
-
-              <div
-                className={`drop-zone${dragOver ? " drag-over" : ""}`}
-                onClick={() => { const el = document.getElementById("csv-input"); el.value=""; el.click(); }}
-                onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-                onDragLeave={() => setDragOver(false)}
-                onDrop={e => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files); }}
-              >
-                <div style={{ fontSize: 36, marginBottom: 8 }}>📂</div>
-                <div style={{ color: p.text, fontSize: 14, fontWeight: 500 }}>Drop CSV files here</div>
-                <div style={{ color: p.muted, fontSize: 12, marginTop: 4 }}>or tap to browse · multiple files supported</div>
-                <input id="csv-input" type="file" accept=".csv" multiple style={{ display: "none" }} onChange={e => { if (e.target.files.length) handleFiles(e.target.files); }} />
-              </div>
-
-              {uploadMsg && (
-                <div style={{ marginTop: 12, padding: "10px 14px", background: p.card, borderRadius: 8, fontSize: 13, color: p.textMuted, border: `1px solid ${p.border}` }}>
-                  {uploadMsg}
-                </div>
-              )}
-
-              {uploadPreview.length > 0 && (
-                <div style={{ marginTop: 14 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                    <div style={{ fontSize: 13, color: p.muted }}>{uploadPreview.length} transactions to import</div>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <button onClick={() => { setUploadPreview([]); setUploadMsg(""); }} style={{ background: "none", border: `1px solid ${p.border}`, color: p.muted, borderRadius: 6, padding: "6px 12px", fontSize: 12 }}>Cancel</button>
-                      <button onClick={importAll} style={{ background: p.accent, color: "#fff", border: "none", borderRadius: 6, padding: "6px 14px", fontSize: 12, fontWeight: 600 }}>Import All</button>
-                    </div>
-                  </div>
-                  <div style={{ maxHeight: 400, overflowY: "auto" }} className="scrollbar">
-                    {uploadPreview.map((t, i) => (
-                      <div key={i} style={{ background: p.card, border: `1px solid ${p.border}`, borderRadius: 8, padding: "10px 12px", marginBottom: 6 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between" }}>
-                          <span style={{ fontSize: 13, color: p.text, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.description}</span>
-                          <span style={{ fontSize: 13, fontWeight: 600, color: p.red, flexShrink: 0, marginLeft: 8 }}>{fmt(t.amount)}</span>
-                        </div>
-                        <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
-                          <span style={{ fontSize: 11, color: p.muted }}>{t.date}</span>
-                            <TagPill tagId={t.tag} />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div style={{ marginTop: 20, background: p.card, borderRadius: 10, padding: 14, border: `1px solid ${p.border}` }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: p.textMuted, marginBottom: 8 }}>How to download your CSV</div>
-                <div style={{ fontSize: 12, color: p.muted, lineHeight: 1.7 }}>
-                  <div style={{ marginBottom: 6 }}><strong style={{ color: p.textMuted }}>Chase:</strong> chase.com → Accounts → Download → CSV</div>
-                  <div style={{ marginBottom: 6 }}><strong style={{ color: p.textMuted }}>Capital One:</strong> capitalone.com → Account → Download Transactions → CSV</div>
-                  <div><strong style={{ color: p.textMuted }}>Alliant:</strong> alliantcreditunion.org → Accounts → Export → CSV</div>
-                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${p.border}`, fontSize: 11, color: p.muted }}>
-                    <strong style={{ color: p.textMuted }}>First time setup:</strong> Run this in Supabase SQL Editor:<br/>
-                    <code style={{ fontSize: 10, color: p.accent }}>create table trash_transactions (id text primary key, data jsonb); alter table trash_transactions enable row level security; create policy "public access" on trash_transactions for all using (true) with check (true);</code>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-
-
-          {/* MANAGE */}
-          {tab === 4 && (
-            <div>
-              <div style={{ fontSize: 16, fontWeight: 600, color: p.text, marginBottom: 16 }}>Manage Data</div>
-
-              {/* Clear by account */}
-              <div style={{ background: p.card, border: `1px solid ${p.border}`, borderRadius: 12, padding: 16, marginBottom: 12 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: p.textMuted, marginBottom: 12, textTransform: "uppercase", letterSpacing: ".5px" }}>Clear Transactions by Account</div>
-                <div style={{ fontSize: 12, color: p.muted, marginBottom: 12 }}>This permanently deletes all transactions for the selected account. Your other accounts are not affected.</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {ACCOUNTS.map(acc => (
-                    <button key={acc.id} onClick={async () => {
-                      if (!window.confirm(`Delete ALL transactions for ${acc.name}?`)) return;
-                      setSyncing(true);
-                      const mainIds = txns.filter(t => t.account === acc.id).map(t => String(t.id));
-                      const cashIds = cashTxns.filter(t => t.account === acc.id).map(t => String(t.id));
-                      if (mainIds.length) await db.bulkDelete("transactions", mainIds);
-                      if (cashIds.length) await db.bulkDelete("cash_transactions", cashIds);
-                      await reloadTxns();
-                      await reloadCash();
-                      setSyncing(false);
-                    }} style={{ background: "none", border: `1px solid ${acc.color}44`, color: acc.color, borderRadius: 8, padding: "10px 14px", fontSize: 13, fontWeight: 500, textAlign: "left" }}>
-                      Clear {acc.name} ({allTxns.filter(t=>t.account===acc.id).length} transactions)
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Clear all */}
-              <div style={{ background: p.card, border: `1px solid ${p.red}33`, borderRadius: 12, padding: 16, marginBottom: 12 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: p.red, marginBottom: 8, textTransform: "uppercase", letterSpacing: ".5px" }}>Clear All Data</div>
-                <div style={{ fontSize: 12, color: p.muted, marginBottom: 12 }}>Permanently deletes every transaction from all accounts. Cannot be undone.</div>
-                <button onClick={async () => {
-                  if (!window.confirm("Delete ALL transactions from ALL accounts? This cannot be undone.")) return;
-                  setSyncing(true);
-                  await db.deleteAll("transactions");
-                  await db.deleteAll("cash_transactions");
-                  await reloadTxns();
-                  await reloadCash();
-                  setSyncing(false);
-                }} style={{ background: p.red + "22", border: `1px solid ${p.red}`, color: p.red, borderRadius: 8, padding: "10px 14px", fontSize: 13, fontWeight: 600, width: "100%" }}>
-                  Delete All Transactions
-                </button>
-              </div>
-
-              {/* Stats */}
-              <div style={{ background: p.card, border: `1px solid ${p.border}`, borderRadius: 12, padding: 16, marginBottom: 12 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: p.textMuted, marginBottom: 12, textTransform: "uppercase", letterSpacing: ".5px" }}>Database Summary</div>
-                {ACCOUNTS.map(acc => (
-                  <div key={acc.id} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px solid ${p.border}` }}>
-                    <span style={{ fontSize: 13, color: p.textMuted }}>{acc.name}</span>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: acc.color }}>{allTxns.filter(t=>t.account===acc.id).length} transactions</span>
-                  </div>
-                ))}
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0 0 0" }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: p.text }}>Total</span>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: p.text }}>{allTxns.length} transactions</span>
-                </div>
-              </div>
-
-              {/* Trash */}
-              <div style={{ background: p.card, border: `1px solid ${p.border}`, borderRadius: 12, padding: 16 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: p.textMuted, textTransform: "uppercase", letterSpacing: ".5px" }}>
-                    Trash ({trashTxns.length})
-                  </div>
-                  {trashTxns.length > 0 && (
-                    <button onClick={async () => {
-                      if (!window.confirm(`Permanently delete all ${trashTxns.length} trashed transactions? This cannot be undone.`)) return;
-                      setSyncing(true);
-                      await db.deleteAll("trash_transactions");
-                      await reloadTrash();
-                      setSyncing(false);
-                    }} style={{ fontSize: 12, padding: "4px 12px", borderRadius: 6, border: `1px solid ${p.red}`, background: p.red+"22", color: p.red, cursor: "pointer" }}>
-                      Empty Trash
-                    </button>
-                  )}
-                </div>
-                {trashTxns.length === 0 && <div style={{ fontSize: 12, color: p.muted, textAlign: "center", padding: "12px 0" }}>Trash is empty</div>}
-                <div style={{ maxHeight: 320, overflowY: "auto" }}>
-                  {[...trashTxns].sort((a,b) => new Date(b.deletedAt||0) - new Date(a.deletedAt||0)).map(t => (
-                    <div key={t.id} style={{ background: p.surface, border: `1px solid ${p.border}`, borderRadius: 8, padding: "10px 12px", marginBottom: 6 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, color: p.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.description}</div>
-                          <div style={{ fontSize: 11, color: p.muted, marginTop: 2 }}>{t.date} · {fmt(t.amount)} · {ACCOUNTS.find(a=>a.id===t.account)?.name || t.account}</div>
-                          {t.deletedAt && <div style={{ fontSize: 10, color: p.muted, marginTop: 1 }}>Deleted {new Date(t.deletedAt).toLocaleDateString()}</div>}
-                        </div>
-                        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                          <button onClick={async () => {
-                            setSyncing(true);
-                            const { deletedAt, ...restored } = t;
-                            if (t.account === "cash") await saveCash(restored);
-                            else await saveTxn(restored);
-                            await deleteFromTrash(t.id);
-                            setSyncing(false);
-                          }} style={{ fontSize: 11, padding: "3px 8px", borderRadius: 5, border: `1px solid ${p.accent}`, background: "none", color: p.accent, cursor: "pointer" }}>
-                            Restore
-                          </button>
-                          <button onClick={async () => {
-                            if (!window.confirm("Permanently delete this transaction?")) return;
-                            setSyncing(true);
-                            await deleteFromTrash(t.id);
-                            setSyncing(false);
-                          }} style={{ fontSize: 11, padding: "3px 8px", borderRadius: 5, border: `1px solid ${p.red}44`, background: "none", color: p.red, cursor: "pointer" }}>
-                            Delete
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Bulk Tag Modal — from merchant root matching */}
-        {bulkTagModal && (
-          <BulkTagModal
-            modal={bulkTagModal}
-            onConfirm={(selectedTxns, tag) => {
-              selectedTxns.forEach(t => withSync(() =>
-                cashTxns.find(c=>c.id===t.id) ? updateCash(t.id, { tag }) : updateTxn(t.id, { tag })
-              ));
-            }}
-            onClose={() => setBulkTagModal(null)}
-          />
-        )}
-
-        {/* Search Bulk Tag Modal — tag all search results */}
-        {searchBulkModal && (
-          <BulkTagModal
-            modal={{ ...searchBulkModal, tag: "other", tagLabel: "select a tag", root: `"${searchQuery}" search results` }}
-            onConfirm={(selectedTxns, tag) => {
-              selectedTxns.forEach(t => withSync(() =>
-                cashTxns.find(c=>c.id===t.id) ? updateCash(t.id, { tag }) : updateTxn(t.id, { tag })
-              ));
-            }}
-            onClose={() => setSearchBulkModal(null)}
-          />
-        )}
-      </div>
-    </>
-  );
-}
-
-const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(<BudgetTracker />);
-  </script>
 </body>
 </html>
