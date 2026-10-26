@@ -579,8 +579,7 @@ form.addacct input { flex: 1 1 10em; }
     $("monthLabel").textContent = MONTHS[M.m - 1] + " " + M.y;
 
     const ban = $("banner");
-    if (S.sample) { ban.hidden = false; ban.innerHTML = "<strong>These are example transactions.</strong> Add your statements below and they'll replace the examples."; }
-    else if (M.snap) { ban.hidden = false; ban.innerHTML = `<strong>Saved snapshot of ${MONTHS[M.m - 1]}</strong>, saved ${esc(niceDate(M.snap.savedAt))}. This month's transactions were cleared, so it's view only.`; }
+    if (M.snap) { ban.hidden = false; ban.innerHTML = `<strong>Saved snapshot of ${MONTHS[M.m - 1]}</strong>, saved ${esc(niceDate(M.snap.savedAt))}. This month's transactions were cleared, so it's view only.`; }
     else ban.hidden = true;
 
     // summary
@@ -631,25 +630,24 @@ form.addacct input { flex: 1 1 10em; }
     const mon = MONTHS[M.m - 1];
     let h = `<div class="checks-head"><span class="label">${mon} statements</span>
       <span class="row"><span class="count${n === total && total ? " done" : ""}">${n} of ${total} in</span>
-      ${M.filtering ? `<button class="chip" data-act="showAll" aria-pressed="true">Show all</button>` : ""}<button class="chip" data-act="editAccts" aria-pressed="${S.editAccts}">${S.editAccts ? "Done" : "Edit list"}</button></span></div><div class="chiprow">`;
+      ${M.filtering ? `<button class="chip" data-act="showAll" aria-pressed="true" title="Some cards are hidden. Tap to show every card again.">Show all</button>` : ""}<button class="chip" data-act="editAccts" aria-pressed="${S.editAccts}">${S.editAccts ? "Done" : "Edit list"}</button></span></div><div class="chiprow">`;
     h += S.accts.map(a => {
       const has = thru[a.name];
       if (S.editAccts) return `<button class="acct editing" data-act="rmAcct" data-acct="${esc(a.name)}" style="--c:var(--k${a.c})" aria-label="Remove ${esc(a.name)} from the list"><span class="box">×</span>${esc(a.name)}</button>`;
       const off = has && S.hidden.includes(a.name);
-      if (has) return `<button class="acct ${off ? "hiddenacct" : "in"}" data-act="toggleAcct" data-acct="${esc(a.name)}" style="--c:var(--k${a.c})" aria-pressed="${!off}" aria-label="${esc(a.name)}, through the ${ord(has)}: ${off ? "hidden. Tap to show" : "showing. Tap to hide"}">
+      if (has) return `<button class="acct ${off ? "hiddenacct" : "in"}" title="${off ? "Tap to show this card's spending again" : "Tap to hide this card's spending. To add another file for it, use Add statements below."}" data-act="toggleAcct" data-acct="${esc(a.name)}" style="--c:var(--k${a.c})" aria-pressed="${!off}" aria-label="${esc(a.name)}, through the ${ord(has)}: ${off ? "hidden. Tap to show" : "showing. Tap to hide"}">
         <span class="box">${off ? "" : "✓"}</span>${esc(a.name)}<span class="thru">${off ? "hidden" : "thru " + mon.slice(0, 3) + " " + has}</span></button>`;
-      return `<button class="acct missing" data-act="upFor" data-acct="${esc(a.name)}" style="--c:var(--k${a.c})" aria-label="${esc(a.name)}: not uploaded yet. Tap to upload">
+      return `<button class="acct missing" title="Tap to upload this card's statement" data-act="upFor" data-acct="${esc(a.name)}" style="--c:var(--k${a.c})" aria-label="${esc(a.name)}: not uploaded yet. Tap to upload">
         <span class="box"></span>${esc(a.name)}<span class="thru">tap to upload</span></button>`;
     }).join("");
-    if (hasCash && !S.editAccts) { const off = S.hidden.includes("Cash"); h += `<button class="acct ${off ? "hiddenacct" : "in"}" data-act="toggleAcct" data-acct="Cash" style="--c:var(--c-cash)" aria-pressed="${!off}"><span class="box">${off ? "" : "✓"}</span>Cash<span class="thru">${off ? "hidden" : ""}</span></button>`; }
-    if (hasBills && !S.editAccts) { const off = S.hidden.includes("Bills"); h += `<button class="acct ${off ? "hiddenacct" : "in"}" data-act="toggleAcct" data-acct="Bills" style="--c:var(--accent)" aria-pressed="${!off}"><span class="box">${off ? "" : "✓"}</span>Bank bills<span class="thru">${off ? "hidden" : "automatic"}</span></button>`; }
+    if (hasCash && !S.editAccts) { const off = S.hidden.includes("Cash"); h += `<button class="acct ${off ? "hiddenacct" : "in"}" title="Tap to ${off ? "show" : "hide"} cash spending" data-act="toggleAcct" data-acct="Cash" style="--c:var(--c-cash)" aria-pressed="${!off}"><span class="box">${off ? "" : "✓"}</span>Cash<span class="thru">${off ? "hidden" : ""}</span></button>`; }
+    if (hasBills && !S.editAccts) { const off = S.hidden.includes("Bills"); h += `<button class="acct ${off ? "hiddenacct" : "in"}" title="Tap to ${off ? "show" : "hide"} the bills you pay from the bank" data-act="toggleAcct" data-acct="Bills" style="--c:var(--accent)" aria-pressed="${!off}"><span class="box">${off ? "" : "✓"}</span>Bank bills<span class="thru">${off ? "hidden" : "automatic"}</span></button>`; }
     if (unassigned) h += `<button class="acct unassigned" data-act="toUpload"><span class="box">?</span>${unassigned} from an unknown card</button>`;
     if (!S.editAccts && !S.adding) h += `<button class="acct add" data-act="addAcct"><span class="box">+</span>Add a card</button>`;
     h += `</div>`;
     if (S.adding) h += `<form class="addacct" id="addAcctForm"><input type="text" id="newAcct" placeholder="Card name, like Safeway" aria-label="New card name" maxlength="24"><button class="btn" type="submit">Add</button><button class="btn ghost" type="button" data-act="cancelAdd">Cancel</button></form>`;
     if (S.editAccts) h += `<p class="note" style="margin:0">Tap a card to take it off the list. Its transactions stay on the calendar.</p>`;
-    else if (M.filtering) h += `<p class="note" style="margin:0">Showing only the checked cards. Totals, the calendar and the report count just those. Tap a card to show or hide it.</p>`;
-    else if (n) h += `<p class="note" style="margin:0">Tap a checked card to hide its spending. To add another file for a card, use Add statements below.</p>`;
+
     $("checks").innerHTML = h;
   }
 
