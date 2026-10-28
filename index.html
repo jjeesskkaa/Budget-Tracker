@@ -203,10 +203,11 @@ form.addacct input { flex: 1 1 10em; }
 .acct.editing.dragging { cursor: grabbing; border-color: var(--accent); border-style: dashed; background: color-mix(in oklab, var(--accent) 12%, var(--surface)); box-shadow: 0 4px 14px rgba(0,0,0,.18); }
 body.dragging-acct { cursor: grabbing; }
 
-.notefab { position: fixed; z-index: 50; right: max(16px, env(safe-area-inset-right)); bottom: max(16px, env(safe-area-inset-bottom)); height: 48px; padding: 0 18px 0 14px; border-radius: 999px; border: 0; background: var(--accent); color: var(--accent-fg); box-shadow: 0 4px 14px rgba(0,0,0,.25); display: flex; align-items: center; gap: 8px; font: 700 15px var(--body); cursor: pointer; }
-.notefab svg { width: 20px; height: 20px; pointer-events: none; }
-.notefab .dotmark { width: 8px; height: 8px; border-radius: 50%; background: var(--heat); box-shadow: 0 0 0 2px var(--accent); }
-.notepanel { position: fixed; z-index: 51; right: max(16px, env(safe-area-inset-right)); bottom: max(16px, env(safe-area-inset-bottom)); width: min(460px, calc(100vw - 32px)); height: min(70vh, 640px); background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 12px 34px rgba(0,0,0,.25); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.notefab { position: fixed; z-index: 50; left: 0; top: 0; width: 54px; height: 54px; border-radius: 50%; border: 0; background: var(--accent); color: var(--accent-fg); box-shadow: 0 4px 14px rgba(0,0,0,.25); display: grid; place-items: center; touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; }
+.notefab svg { width: 24px; height: 24px; pointer-events: none; }
+.notefab.moving { cursor: grabbing; box-shadow: 0 8px 22px rgba(0,0,0,.32); }
+.notefab .dotmark { position: absolute; top: 9px; right: 9px; width: 9px; height: 9px; border-radius: 50%; background: var(--heat); border: 2px solid var(--accent); }
+.notepanel { position: fixed; z-index: 51; left: 16px; top: 16px; width: min(460px, calc(100vw - 32px)); height: min(70vh, 640px, calc(100vh - 32px)); background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 12px 34px rgba(0,0,0,.25); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
 .notepanel .nh { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
 .notepanel h3 { font-family: var(--display); font-size: 18px; margin: 0; }
 .notepanel textarea { flex: 1 1 auto; width: 100%; box-sizing: border-box; font-family: var(--body); font-size: 15px; line-height: 1.5; resize: none; min-height: 0; }
@@ -306,14 +307,14 @@ body.dragging-acct { cursor: grabbing; }
   </details>
 </div>
 
-<button class="notefab" id="noteFab" type="button" aria-expanded="false" aria-controls="notePanel">
+<button class="notefab" id="noteFab" type="button" aria-expanded="false" aria-controls="notePanel" aria-label="Notes. Tap to open, drag to move" title="Notes · drag to move">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 13h8M8 17h5"/></svg>
-  Notes<span class="dotmark" id="noteDot" hidden></span>
+  <span class="dotmark" id="noteDot" hidden></span>
 </button>
 <div class="notepanel" id="notePanel" role="dialog" aria-label="Notes" hidden>
   <div class="nh"><h3>Notes</h3><span class="row"><button class="chip" type="button" id="noteDate" title="Add today's date where the cursor is">+ Date</button><button class="chip" type="button" id="noteClose">Minimize</button></span></div>
   <textarea id="noteText" placeholder="One long running note. Tap + Date to stamp today's date. It saves as you type and stays when you clear transactions."></textarea>
-  <div class="nf"><span class="note">Saves as you type</span><span class="note" id="noteSaved"></span></div>
+  <div class="nf"><span class="note">Saves as you type · drag the round button to move it</span><span class="note" id="noteSaved"></span></div>
 </div>
 
 <script>
@@ -1040,20 +1041,65 @@ body.dragging-acct { cursor: grabbing; }
 
   // ---------- notes (fixed button, one long note) ----------
   (function notes() {
-    const K_NOTES = "dbd.notes.v1";
+    const K_NOTES = "dbd.notes.v1", K_FABPOS = "dbd.notefab.v1";
     const fab = $("noteFab"), panel = $("notePanel"), ta = $("noteText"), dot = $("noteDot"), saved = $("noteSaved");
     try { ta.value = localStorage.getItem(K_NOTES) || ""; } catch (e) {}
     const write = () => { try { localStorage.setItem(K_NOTES, ta.value); saved.textContent = "Saved"; } catch (e) { saved.textContent = "Couldn't save"; } };
     const showDot = () => { dot.hidden = !ta.value.trim(); };
+    const size = 54, edge = 12;
+    let pos = null;
+    try { pos = JSON.parse(localStorage.getItem(K_FABPOS) || "null"); } catch (e) {}
+    const clamp = () => {
+      const w = window.innerWidth, h = window.innerHeight;
+      if (!pos || typeof pos.x !== "number") pos = { x: 1, y: 1 };
+      const x = Math.min(Math.max(edge, pos.x * (w - size)), w - size - edge);
+      const y = Math.min(Math.max(edge, pos.y * (h - size)), h - size - edge);
+      fab.style.left = x + "px"; fab.style.top = y + "px";
+      return { x, y };
+    };
+    const placePanel = () => {
+      if (panel.hidden) return;
+      const { x, y } = clamp(), w = window.innerWidth, h = window.innerHeight;
+      const pw = panel.offsetWidth, ph = panel.offsetHeight;
+      let left = x + size / 2 > w / 2 ? x + size - pw : x;
+      let top = y + size / 2 > h / 2 ? y + size - ph : y;
+      left = Math.min(Math.max(16, left), w - pw - 16);
+      top = Math.min(Math.max(16, top), h - ph - 16);
+      panel.style.left = left + "px"; panel.style.top = top + "px";
+    };
     const setOpen = open => {
-      panel.hidden = !open; fab.hidden = open; fab.setAttribute("aria-expanded", String(open));
+      panel.hidden = !open; fab.hidden = open; if (open) placePanel(); fab.setAttribute("aria-expanded", String(open));
       if (open) { ta.focus(); } else { fab.focus(); }
       showDot();
     };
     let t = null;
     ta.addEventListener("input", () => { clearTimeout(t); saved.textContent = ""; t = setTimeout(write, 300); showDot(); });
     ta.addEventListener("blur", () => { clearTimeout(t); write(); });
-    fab.onclick = () => setOpen(true);
+    let mv = null;
+    fab.addEventListener("pointerdown", e => {
+      if (e.button > 0) return;
+      const r = fab.getBoundingClientRect();
+      mv = { dx: e.clientX - r.left, dy: e.clientY - r.top, sx: e.clientX, sy: e.clientY, on: false };
+      fab.setPointerCapture(e.pointerId);
+    });
+    fab.addEventListener("pointermove", e => {
+      if (!mv) return;
+      if (!mv.on && Math.hypot(e.clientX - mv.sx, e.clientY - mv.sy) < 6) return;
+      mv.on = true; fab.classList.add("moving");
+      const w = window.innerWidth, h = window.innerHeight;
+      pos = { x: (e.clientX - mv.dx) / (w - size), y: (e.clientY - mv.dy) / (h - size) };
+      clamp();
+    });
+    const up = e => {
+      if (!mv) return;
+      const moved = mv.on; mv = null; fab.classList.remove("moving");
+      if (moved) { try { localStorage.setItem(K_FABPOS, JSON.stringify(pos)); } catch (err) {} }
+      else if (e.type === "pointerup") setOpen(true);
+    };
+    fab.addEventListener("pointerup", up);
+    fab.addEventListener("pointercancel", up);
+    fab.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen(true); } });
+    window.addEventListener("resize", () => { clamp(); placePanel(); });
     $("noteClose").onclick = () => { clearTimeout(t); write(); setOpen(false); };
     $("noteDate").onclick = () => {
       const d = new Date();
@@ -1068,7 +1114,7 @@ body.dragging-acct { cursor: grabbing; }
     };
     document.addEventListener("keydown", e => { if (e.key === "Escape" && !panel.hidden) { write(); setOpen(false); } });
     window.dbdNotes = { get: () => ta.value, set: v => { ta.value = v; try { localStorage.setItem(K_NOTES, v); } catch (e) {} showDot(); } };
-    fab.hidden = false; showDot();
+    clamp(); fab.hidden = false; showDot();
   })();
 
   // ---------- boot ----------
