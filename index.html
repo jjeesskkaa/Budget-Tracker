@@ -3,10 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Day by Day</title>
+<meta name="apple-mobile-web-app-title" content="Day by Day">
+<meta name="application-name" content="Day by Day">
+<meta name="theme-color" content="#2f6b5a">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxODAgMTgwIj48cmVjdCB3aWR0aD0iMTgwIiBoZWlnaHQ9IjE4MCIgcng9IjQwIiBmaWxsPSIjMmY2YjVhIi8+PHJlY3QgeD0iMzAiIHk9IjM4IiB3aWR0aD0iMTIwIiBoZWlnaHQ9IjExMiIgcng9IjE2IiBmaWxsPSIjZmZmIi8+PHJlY3QgeD0iMzAiIHk9IjM4IiB3aWR0aD0iMTIwIiBoZWlnaHQ9IjMwIiByeD0iMTYiIGZpbGw9IiNlNmVmZTkiLz48cmVjdCB4PSIzMCIgeT0iNTQiIHdpZHRoPSIxMjAiIGhlaWdodD0iMTQiIGZpbGw9IiNlNmVmZTkiLz48cmVjdCB4PSI1OCIgeT0iMjYiIHdpZHRoPSIxMCIgaGVpZ2h0PSIyNCIgcng9IjUiIGZpbGw9IiNmZmYiLz48cmVjdCB4PSIxMTIiIHk9IjI2IiB3aWR0aD0iMTAiIGhlaWdodD0iMjQiIHJ4PSI1IiBmaWxsPSIjZmZmIi8+PGc+PHJlY3QgeD0iNDIiIHk9IjgwIiB3aWR0aD0iMjIiIGhlaWdodD0iMjIiIHJ4PSI1IiBmaWxsPSIjZjFkY2MwIi8+PHJlY3QgeD0iNjkiIHk9IjgwIiB3aWR0aD0iMjIiIGhlaWdodD0iMjIiIHJ4PSI1IiBmaWxsPSIjYzk3ODFjIi8+PHJlY3QgeD0iOTYiIHk9IjgwIiB3aWR0aD0iMjIiIGhlaWdodD0iMjIiIHJ4PSI1IiBmaWxsPSIjZWNlZWU5Ii8+PHJlY3QgeD0iMTIzIiB5PSI4MCIgd2lkdGg9IjE1IiBoZWlnaHQ9IjIyIiByeD0iNSIgZmlsbD0iI2UzYjc3ZSIvPjxyZWN0IHg9IjQyIiB5PSIxMTAiIHdpZHRoPSIyMiIgaGVpZ2h0PSIyMiIgcng9IjUiIGZpbGw9IiNlY2VlZTkiLz48cmVjdCB4PSI2OSIgeT0iMTEwIiB3aWR0aD0iMjIiIGhlaWdodD0iMjIiIHJ4PSI1IiBmaWxsPSIjZTNiNzdlIi8+PHJlY3QgeD0iOTYiIHk9IjExMCIgd2lkdGg9IjIyIiBoZWlnaHQ9IjIyIiByeD0iNSIgZmlsbD0iI2E4NWYxMCIvPjxyZWN0IHg9IjEyMyIgeT0iMTEwIiB3aWR0aD0iMTUiIGhlaWdodD0iMjIiIHJ4PSI1IiBmaWxsPSIjZjFkY2MwIi8+PC9nPjwvc3ZnPg==">
+<link rel="icon" type="image/png" sizes="32x32" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAEpklEQVR4AbxWe2wURRz+Zvb22uvZu17fL/uIhISUtmoaYkNIaFAqiCGSNELFZ6qR1tREjZqo0UT9AxNN/KNAwGhiAigxEaxorInyn+Dz2tI0PLQ0oEJLX9Dbe+4OM9Psde9uey20dG+/m5nv95vv9+3ezN5SWI66Vx5313Zsf7O+fce3dR2tF+s7WtlSQGpxTaEtalhKIm6gvv3RjSSoD1DQd0HIQwQotyYupi+1uKbQJlrsdO2uxzaZetJA/QutzSDKD5ys5Li9JyFVlLLvTBNU3hIDn2GZD0qNT0RtyjS9BQQl89W/q6QMmxvWzpcmc6qLSufNA0ipqE0JYeuxgOPlbTvx/pO7UJiTO2d2vidH5nRu3T5njjUgalMCMqeBVRVVaFm3QUKIE0KwqaFRjk3e2m5ZsxaEEJTm5cdzhIa1qLVPeG2xCCutpOgX86s8+vYH+Oi5F/FM8xaJisIiEUJr0wNybPLWdkfTRplTWVgczxEaQqvEly9jSV+VwkASB7zR+jQyVDWBj+pR6IYOg7EE3jowmCFzIrGolZZar7bsTODMga2BsrwCMx5vp0MaRq6NxcdzdUROIKylhMsLClM4QdgaoNSWFvm3DIei2M61rRSOJN5C25k3SUai9pq2Bi6NjKLIm7+kuMg17TzbGtD5YqKEYikhNBdswEzUQ1PQ/utD4F8/tP/7wWIhjPm/xuD+FonzhztgRIPQggFMXZ+Q0ILTAL+A8d6vMPrb54hMXjLlbFvbO2BmRgNjiAUnIIzEtHHen8ToH0dwfeikxHjfNwiPDSPEV32Mbz2BIN8tseCkNBwe+xvBkUFTzrZNa8B2xhKTaQ1QJfFhRJQMqO68BAsOt0+uFZMU60ZxZplDUHW2HyctnbQGnDnlcJfdA3dpPdzl98KR5UP1tt1Y9ewRibqXfoaaXQSvxwdP9gy83lwQRyaK13Wi8L42ZFc1WsqldtMaMPhjNwIFYaiIMAWMf/TwNF9jIQk9NCkVL5/+CWe6P5S43NsjOaZHwPh8ZsTkeK6vtAZCfEFpfIUHQwG+0qcRiYQxdaYH186fkJgY6EYscBWnDrRj4NhuiV8/7eQ7Q0Nw9CzC40MIL2YXwOZgfItZaSb+oGKROBUNiLsye10EJB6z68xm2kWTJhM+JlRNyKQOJxQ1I85RNROEWmQJicfsOpbM1HBmpgtZLjdcmW7e3gHV6YR35QZ4VqyX8NU8DMXlw5q2LtRsfU2i8fn9IIoTroKVyMithtOb/vWMppYFRqcmJC221ExxYSJLXD/EqvesaOIGmuC+s0HmldTej9WPvC5ReveDklM9JcjwVUgzgrg6JX4a0UsEZWBXEingx79OJVOLHvf8eTJFQ9Tmd4D4kyP+f86i7eP3cPSXE/j93OCiIDSEVu/QueQyfEz8lAApBsAPUfidgwekESFwqxAaQotLppyiNiW6sY9H7H8gHriN5yTfvHupf98XFwzgKSzzwRh7YrDr0DBfA0B/16FjhkE282fnhWXwMQymN/ftOdwtakkDotO/9+D3LMux2oDxFjdynL98p3+TEJMWAJEitRg7LrSZS6np3fPlzB8GgBsAAAD//2aLsHUAAAAGSURBVAMAKuccWSGAVhwAAAAASUVORK5CYII=">
+<link rel="apple-touch-icon" sizes="180x180" href="data:image/png;base64,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">
 <style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
 </head>
 <body>
-<title>Day by Day</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Atkinson+Hyperlegible:wght@400;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
@@ -197,14 +203,18 @@ form.addacct input { flex: 1 1 10em; }
 .acct.editing.dragging { cursor: grabbing; border-color: var(--accent); border-style: dashed; background: color-mix(in oklab, var(--accent) 12%, var(--surface)); box-shadow: 0 4px 14px rgba(0,0,0,.18); }
 body.dragging-acct { cursor: grabbing; }
 
-.notefab { position: fixed; z-index: 50; width: 52px; height: 52px; border-radius: 50%; border: 0; background: var(--accent); color: var(--accent-fg); box-shadow: 0 4px 14px rgba(0,0,0,.25); display: grid; place-items: center; touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; }
-.notefab svg { width: 24px; height: 24px; pointer-events: none; }
-.notefab.moving { cursor: grabbing; box-shadow: 0 8px 22px rgba(0,0,0,.32); }
-.notefab .dotmark { position: absolute; top: 9px; right: 9px; width: 9px; height: 9px; border-radius: 50%; background: var(--heat); border: 2px solid var(--accent); }
-.notepanel { position: fixed; z-index: 49; width: min(340px, calc(100vw - 32px)); background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.22); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
-.notepanel .nh { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-.notepanel h3 { font-family: var(--display); font-size: 17px; margin: 0; }
-.notepanel textarea { font-family: var(--body); font-size: 14.5px; min-height: 180px; max-height: 55vh; resize: vertical; line-height: 1.45; }
+.notefab { position: fixed; z-index: 50; right: max(16px, env(safe-area-inset-right)); bottom: max(16px, env(safe-area-inset-bottom)); height: 48px; padding: 0 18px 0 14px; border-radius: 999px; border: 0; background: var(--accent); color: var(--accent-fg); box-shadow: 0 4px 14px rgba(0,0,0,.25); display: flex; align-items: center; gap: 8px; font: 700 15px var(--body); cursor: pointer; }
+.notefab svg { width: 20px; height: 20px; pointer-events: none; }
+.notefab .dotmark { width: 8px; height: 8px; border-radius: 50%; background: var(--heat); box-shadow: 0 0 0 2px var(--accent); }
+.notepanel { position: fixed; z-index: 51; right: max(16px, env(safe-area-inset-right)); bottom: max(16px, env(safe-area-inset-bottom)); width: min(460px, calc(100vw - 32px)); height: min(70vh, 640px); background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 12px 34px rgba(0,0,0,.25); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.notepanel .nh { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.notepanel h3 { font-family: var(--display); font-size: 18px; margin: 0; }
+.notepanel textarea { flex: 1 1 auto; width: 100%; box-sizing: border-box; font-family: var(--body); font-size: 15px; line-height: 1.5; resize: none; min-height: 0; }
+.notepanel .nf { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.clearbox { display: flex; flex-direction: column; gap: 10px; }
+.clearbox .opt { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--surface); }
+.clearbox .opt > span { flex: 1 1 16em; font-size: 14px; }
+.wrap { padding-bottom: 84px; }
 @media (prefers-reduced-motion: no-preference) { .cell, .chip, .biglist button { transition: border-color .15s, background-color .15s, color .15s; } }
 </style>
 
@@ -216,9 +226,12 @@ body.dragging-acct { cursor: grabbing; }
       <h2 id="monthLabel">October 2026</h2>
       <button class="iconbtn" id="next" aria-label="Next month">›</button>
       <button class="chip" id="reportBtn" style="margin-left:6px">Report</button>
+      <button class="chip" id="clearBtn" aria-expanded="false" aria-controls="clearPanel">Clear</button>
     </div>
   </header>
 
+  <section class="section" id="clearPanel" hidden style="padding:12px"><div class="clearbox" id="clearBox"></div></section>
+  <div id="storeWarn" class="banner" hidden><strong>This browser isn't saving.</strong> Changes will be lost when you close the page. If you opened the file from a Files or email app, open it from your GitHub link in Safari or Chrome instead (private/incognito windows don't save either).</div>
   <div id="banner" class="banner" hidden></div>
   <section class="checks" id="checks" aria-label="Statements included this month"></section>
   <input type="file" id="cardInput" accept=".csv,.txt,text/csv" multiple hidden>
@@ -293,14 +306,14 @@ body.dragging-acct { cursor: grabbing; }
   </details>
 </div>
 
-<button class="notefab" id="noteFab" type="button" aria-label="Notes. Tap to open, drag to move" aria-expanded="false" title="Notes · drag to move" hidden>
+<button class="notefab" id="noteFab" type="button" aria-expanded="false" aria-controls="notePanel">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 13h8M8 17h5"/></svg>
-  <span class="dotmark" id="noteDot" hidden></span>
+  Notes<span class="dotmark" id="noteDot" hidden></span>
 </button>
 <div class="notepanel" id="notePanel" role="dialog" aria-label="Notes" hidden>
-  <div class="nh"><h3>Notes</h3><span class="row"><span class="note" id="noteSaved"></span><button class="chip" type="button" id="noteClose">Close</button></span></div>
-  <textarea id="noteText" placeholder="Jot anything here. It saves as you type and stays when you clear transactions."></textarea>
-  <span class="note">Drag the round button to move it out of the way.</span>
+  <div class="nh"><h3>Notes</h3><span class="row"><button class="chip" type="button" id="noteDate" title="Add today's date where the cursor is">+ Date</button><button class="chip" type="button" id="noteClose">Minimize</button></span></div>
+  <textarea id="noteText" placeholder="One long running note. Tap + Date to stamp today's date. It saves as you type and stays when you clear transactions."></textarea>
+  <div class="nf"><span class="note">Saves as you type</span><span class="note" id="noteSaved"></span></div>
 </div>
 
 <script>
@@ -310,7 +323,7 @@ body.dragging-acct { cursor: grabbing; }
   const K_TX = "dbd.txns.v1", K_BILLS = "dbd.bills.v1", K_ACCTS = "dbd.accts.v1", K_MAP = "dbd.cardmap.v1", K_SNAP = "dbd.snaps.v1", K_NOBILLS = "dbd.nobills.v1", K_DISMISS = "dbd.notbills.v1";
   const DEFAULT_ACCTS = ["Kohl's", "Venture", "Savor", "Lowe's", "Amazon"].map((name, i) => ({ name, c: i + 1 }));
 
-  const S = { txns: [], bills: [], accts: DEFAULT_ACCTS.slice(), map: {}, snaps: {}, hidden: [], noBills: false, dismissed: [], report: false, confirmDelSnap: "", sample: false, sampleBills: [], view: "", sel: null, files: [], confirmClear: false, editAccts: false, adding: false, pendingAcct: "" };
+  const S = { txns: [], bills: [], accts: DEFAULT_ACCTS.slice(), map: {}, snaps: {}, hidden: [], noBills: false, dismissed: [], report: false, confirmDelSnap: "", clearOpen: false, clearStep: "", clearMsg: "", view: "", sel: null, files: [], confirmClear: false, editAccts: false, adding: false, pendingAcct: "" };
 
   // ---------- helpers ----------
   const pad = n => String(n).padStart(2, "0");
@@ -344,7 +357,7 @@ body.dragging-acct { cursor: grabbing; }
   // Charges that appear once a month, around the same day, in two or more months
   function suggestions() {
     const by = {};
-    if (!S.sample) S.txns.forEach(t => { if (!t.counted || t.amount <= 0 || t.acct === "Cash") return; const ym = t.date.slice(0, 7); (by[ym] = by[ym] || []).push({ key: t.key, name: t.name, amount: t.amount, d: +t.date.slice(8, 10) }); });
+    S.txns.forEach(t => { if (!t.counted || t.amount <= 0 || t.acct === "Cash") return; const ym = t.date.slice(0, 7); (by[ym] = by[ym] || []).push({ key: t.key, name: t.name, amount: t.amount, d: +t.date.slice(8, 10) }); });
     Object.values(S.snaps).forEach(sn => { if (by[sn.ym]) return; by[sn.ym] = sn.txns.filter(x => x.kind === "spend" && x.amount > 0 && x.acct !== "Cash").map(x => ({ key: keyOf(x.name), name: x.name, amount: x.amount, d: x.d })); });
     const months = Object.keys(by).sort();
     if (months.length < 2) return [];
@@ -393,10 +406,10 @@ body.dragging-acct { cursor: grabbing; }
     return hit ? hit.name : "";
   }
   function save() {
-    if (!S.sample) try { localStorage.setItem(K_TX, JSON.stringify(S.txns)); } catch (e) {}
+    try { localStorage.setItem(K_TX, JSON.stringify(S.txns)); } catch (e) {}
     try { localStorage.setItem(K_BILLS, JSON.stringify(S.bills)); } catch (e) {}
   }
-  const bills = () => S.sample ? S.sampleBills : S.bills;
+  const bills = () => S.bills;
 
   // ---------- merchant names ----------
   function cleanName(desc) {
@@ -518,7 +531,6 @@ body.dragging-acct { cursor: grabbing; }
   function handleFiles(list, forced) {
     const files = Array.from(list || []);
     if (!files.length) return;
-    if (S.sample) { S.sample = false; S.txns = []; S.files = []; S.sel = null; }
     let done = 0; const added = [];
     files.forEach(f => {
       const rd = new FileReader();
@@ -556,7 +568,7 @@ body.dragging-acct { cursor: grabbing; }
     const [y, m] = S.view.split("-").map(Number);
     const dim = daysIn(y, m);
     let tx = S.txns.filter(t => t.date.startsWith(S.view)), snap = null;
-    if (!tx.length && !S.sample && S.snaps[S.view]) {
+    if (!tx.length && S.snaps[S.view]) {
       snap = S.snaps[S.view];
       tx = snap.txns.map((x, i) => ({ id: "s" + i, acct: x.acct, date: S.view + "-" + pad(x.d), desc: x.name, name: x.name, key: keyOf(x.name), amount: x.amount, kind: x.kind, counted: x.kind === "spend", ro: true }));
     }
@@ -605,7 +617,9 @@ body.dragging-acct { cursor: grabbing; }
 
     const ban = $("banner");
     if (M.snap) { ban.hidden = false; ban.innerHTML = `<strong>Saved snapshot of ${MONTHS[M.m - 1]}</strong>, saved ${esc(niceDate(M.snap.savedAt))}. This month's transactions were cleared, so it's view only.`; }
+    else if (!S.txns.length && !Object.keys(S.snaps).length) { ban.hidden = false; ban.innerHTML = `<strong>Nothing loaded yet.</strong> Add your card statements below to see your spending day by day.`; }
     else ban.hidden = true;
+    renderClear();
 
     // summary
     const avg = M.lastDay ? M.spent / M.lastDay : 0;
@@ -719,8 +733,26 @@ body.dragging-acct { cursor: grabbing; }
     p.innerHTML = h;
   }
 
+  function renderClear() {
+    const p = $("clearPanel"); p.hidden = !S.clearOpen; $("clearBtn").setAttribute("aria-expanded", String(!!S.clearOpen));
+    if (!S.clearOpen) return;
+    const n = S.txns.length;
+    const curTxt = n ? `<strong>Clear current data</strong><br><span class="note">Removes all ${n} loaded transactions and cash entries. Keeps your bills, cards, saved months and notes.</span>` : `<strong>Clear current data</strong><br><span class="note">No transactions loaded right now.</span>`;
+    const allTxt = `<strong>Erase everything</strong><br><span class="note">Removes all data saved in this browser: transactions, monthly bills, card list, saved months, notes and settings. This can't be undone. Copy a backup first (under Monthly bills) if you might want any of it.</span>`;
+    $("clearBox").innerHTML =
+      `<div class="opt"><span>${curTxt}</span><span class="row">${!n ? "" : S.clearStep === "cur" ? `<button class="btn danger" data-act="clearCurYes">Yes, clear ${n}</button><button class="btn ghost" data-act="clearStep" data-step="">Cancel</button>` : `<button class="btn ghost" data-act="clearStep" data-step="cur">Clear current</button>`}</span></div>` +
+      `<div class="opt"><span>${allTxt}</span><span class="row">${S.clearStep === "all" ? `<button class="btn danger" data-act="eraseAll">Yes, erase everything</button><button class="btn ghost" data-act="clearStep" data-step="">Cancel</button>` : `<button class="btn ghost" data-act="clearStep" data-step="all" style="color:var(--warn);border-color:var(--warn)">Erase everything</button>`}</span></div>` +
+      `<div class="row"><span class="note" id="clearMsg">${esc(S.clearMsg || "")}</span><button class="chip" data-act="clearClose" style="margin-left:auto">Close</button></div>`;
+  }
+  function eraseAll() {
+    try { Object.keys(localStorage).filter(k => k.startsWith("dbd.")).forEach(k => localStorage.removeItem(k)); } catch (e) {}
+    Object.assign(S, { txns: [], bills: [], accts: DEFAULT_ACCTS.map(a => Object.assign({}, a)), map: {}, snaps: {}, hidden: [], noBills: false, dismissed: [], files: [], sel: null, report: false, confirmClear: false, view: todayStr.slice(0, 7) });
+    $("noBills").checked = false;
+    if (window.dbdNotes) { window.dbdNotes.set(""); try { localStorage.removeItem("dbd.notes.v1"); } catch (e) {} }
+  }
+
   function renderUpload() {
-    const real = S.sample ? 0 : S.txns.length;
+    const real = S.txns.length;
     $("uploadNote").textContent = real ? real + " transactions loaded" : "";
     if (!real && !S.uploadTouched) $("uploadSec").open = true;
     $("files").innerHTML = S.files.map(f => f.err
@@ -818,7 +850,7 @@ body.dragging-acct { cursor: grabbing; }
   function renderSnaps(M) {
     const list = Object.values(S.snaps).sort((a, b) => b.ym.localeCompare(a.ym));
     $("snapNote").textContent = list.length ? list.length + " saved" : "";
-    const live = !S.sample && S.txns.some(t => t.date.startsWith(S.view));
+    const live = S.txns.some(t => t.date.startsWith(S.view));
     $("snapNow").innerHTML = live ? `<button class="btn ghost" data-act="snapNow">${S.snaps[S.view] ? "Update" : "Save"} snapshot of ${MONTHS[M.m - 1]} now</button>` : "";
     $("snaps").innerHTML = list.length ? list.map(sn => {
       const [y, m] = sn.ym.split("-").map(Number);
@@ -888,6 +920,10 @@ body.dragging-acct { cursor: grabbing; }
     else if (act === "addSug") { const x = suggestions().find(z => z.key === a.dataset.key); if (x) { bills().push({ key: x.key, name: x.name, amount: x.amount, day: x.day }); save(); render(); } }
     else if (act === "noSug") { S.dismissed.push(a.dataset.key); saveDismissed(); render(); }
     else if (act === "toSugs") { $("billsSec").open = true; $("sugs").scrollIntoView({ block: "center" }); }
+    else if (act === "clearStep") { S.clearStep = a.dataset.step; S.clearMsg = ""; render(); }
+    else if (act === "clearClose") { S.clearOpen = false; S.clearStep = ""; S.clearMsg = ""; render(); }
+    else if (act === "clearCurYes") { const n = S.txns.length; S.txns = []; S.files = []; S.sel = null; S.clearStep = ""; S.clearMsg = `Cleared ${n} transactions.`; save(); render(); }
+    else if (act === "eraseAll") { eraseAll(); S.clearStep = ""; S.clearMsg = "Everything was erased."; render(); }
     else if (act === "unbill") { const list = bills(); const i = list.findIndex(b => b.key === a.dataset.key); if (i >= 0) list.splice(i, 1); save(); render(); }
   });
   document.addEventListener("submit", e => {
@@ -904,7 +940,7 @@ body.dragging-acct { cursor: grabbing; }
       if (!(amt > 0)) { $("billAmt").focus(); return; }
       if (!(day >= 1 && day <= 31)) { $("billDay").focus(); return; }
       const b = { key: keyOf(name) || name.toUpperCase(), name, amount: Math.round(amt * 100) / 100, day, assumed: true };
-      [S.bills].concat(S.sample ? [S.sampleBills] : []).forEach(list => { const i = list.findIndex(x => x.key === b.key); if (i >= 0) list.splice(i, 1); list.push(b); });
+      [S.bills].forEach(list => { const i = list.findIndex(x => x.key === b.key); if (i >= 0) list.splice(i, 1); list.push(b); });
       save(); $("billName").value = ""; $("billAmt").value = ""; $("billDay").value = "";
       $("billMsg").textContent = `Added ${name}, ${money(b.amount)} on the ${ord(day)}.`;
       render(); return;
@@ -914,11 +950,11 @@ body.dragging-acct { cursor: grabbing; }
     const amt = parseFloat($("cashAmt").value);
     if (!(amt > 0)) { $("cashAmt").focus(); return; }
     const note = $("cashNote").value.trim() || "Cash";
-    if (S.sample) { S.sample = false; S.txns = []; S.files = []; }
     const date = S.view + "-" + pad(S.sel);
     S.txns.push({ id: uid(), fileId: "cash", acct: "Cash", date, desc: note, raw: amt, name: note, key: keyOf(note), amount: amt, kind: "spend", counted: true });
     save(); render();
   });
+  $("clearBtn").onclick = () => { S.clearOpen = !S.clearOpen; S.clearStep = ""; S.clearMsg = ""; render(); if (S.clearOpen) $("clearPanel").scrollIntoView({ block: "nearest" }); };
   $("reportBtn").onclick = () => { S.report = !S.report; render(); if (S.report) $("report").scrollIntoView({ block: "start" }); };
   $("noBills").addEventListener("change", e => { S.noBills = e.target.checked; try { localStorage.setItem(K_NOBILLS, S.noBills ? "1" : "0"); } catch (err) {} render(); });
   $("prev").onclick = () => shiftMonth(-1);
@@ -1002,109 +1038,45 @@ body.dragging-acct { cursor: grabbing; }
     const again = [...document.querySelectorAll("[data-drag]")].find(el => el.dataset.drag === m.name); if (again) again.focus();
   });
 
-  // ---------- floating notes ----------
+  // ---------- notes (fixed button, one long note) ----------
   (function notes() {
-    const K_NOTES = "dbd.notes.v1", K_FABPOS = "dbd.notefab.v1";
+    const K_NOTES = "dbd.notes.v1";
     const fab = $("noteFab"), panel = $("notePanel"), ta = $("noteText"), dot = $("noteDot"), saved = $("noteSaved");
     try { ta.value = localStorage.getItem(K_NOTES) || ""; } catch (e) {}
-    const size = 52, edge = 12;
-    let pos = null;
-    try { pos = JSON.parse(localStorage.getItem(K_FABPOS) || "null"); } catch (e) {}
-    const clamp = () => {
-      const w = window.innerWidth, h = window.innerHeight;
-      if (!pos || typeof pos.x !== "number") pos = { x: 1, y: 1 };
-      const x = Math.min(Math.max(edge, pos.x * (w - size)), w - size - edge);
-      const y = Math.min(Math.max(edge, pos.y * (h - size)), h - size - edge);
-      fab.style.left = x + "px"; fab.style.top = y + "px";
-      return { x, y };
-    };
-    const placePanel = () => {
-      if (panel.hidden) return;
-      const { x, y } = clamp(), w = window.innerWidth, h = window.innerHeight;
-      const pw = panel.offsetWidth, ph = panel.offsetHeight;
-      let left = x + size / 2 > w / 2 ? x + size - pw : x;
-      let top = y + size / 2 > h / 2 ? y - ph - 10 : y + size + 10;
-      left = Math.min(Math.max(16, left), w - pw - 16);
-      top = Math.min(Math.max(16, top), h - ph - 16);
-      panel.style.left = left + "px"; panel.style.top = top + "px";
-    };
-    const showDot = () => { dot.hidden = !ta.value.trim() || !panel.hidden; };
+    const write = () => { try { localStorage.setItem(K_NOTES, ta.value); saved.textContent = "Saved"; } catch (e) { saved.textContent = "Couldn't save"; } };
+    const showDot = () => { dot.hidden = !ta.value.trim(); };
     const setOpen = open => {
-      panel.hidden = !open; fab.setAttribute("aria-expanded", String(open));
-      if (open) { placePanel(); ta.focus(); }
+      panel.hidden = !open; fab.hidden = open; fab.setAttribute("aria-expanded", String(open));
+      if (open) { ta.focus(); } else { fab.focus(); }
       showDot();
     };
     let t = null;
-    ta.addEventListener("input", () => {
-      clearTimeout(t); saved.textContent = "";
-      t = setTimeout(() => { try { localStorage.setItem(K_NOTES, ta.value); saved.textContent = "Saved"; } catch (e) { saved.textContent = "Couldn't save"; } }, 400);
-    });
-    $("noteClose").onclick = () => { setOpen(false); fab.focus(); };
-    document.addEventListener("keydown", e => { if (e.key === "Escape" && !panel.hidden) { setOpen(false); fab.focus(); } });
-
-    let mv = null;
-    fab.addEventListener("pointerdown", e => {
-      if (e.button > 0) return;
-      const r = fab.getBoundingClientRect();
-      mv = { dx: e.clientX - r.left, dy: e.clientY - r.top, sx: e.clientX, sy: e.clientY, on: false };
-      fab.setPointerCapture(e.pointerId);
-    });
-    fab.addEventListener("pointermove", e => {
-      if (!mv) return;
-      if (!mv.on && Math.hypot(e.clientX - mv.sx, e.clientY - mv.sy) < 6) return;
-      mv.on = true; fab.classList.add("moving");
-      const w = window.innerWidth, h = window.innerHeight;
-      pos = { x: (e.clientX - mv.dx) / (w - size), y: (e.clientY - mv.dy) / (h - size) };
-      clamp(); placePanel();
-    });
-    const up = e => {
-      if (!mv) return;
-      const moved = mv.on; mv = null; fab.classList.remove("moving");
-      if (moved) { try { localStorage.setItem(K_FABPOS, JSON.stringify(pos)); } catch (err) {} }
-      else if (e.type === "pointerup") setOpen(panel.hidden);
+    ta.addEventListener("input", () => { clearTimeout(t); saved.textContent = ""; t = setTimeout(write, 300); showDot(); });
+    ta.addEventListener("blur", () => { clearTimeout(t); write(); });
+    fab.onclick = () => setOpen(true);
+    $("noteClose").onclick = () => { clearTimeout(t); write(); setOpen(false); };
+    $("noteDate").onclick = () => {
+      const d = new Date();
+      const stamp = d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" }) + " — ";
+      const v = ta.value, st = ta.selectionStart ?? v.length, en = ta.selectionEnd ?? v.length;
+      const before = v.slice(0, st), after = v.slice(en);
+      const lead = !before ? "" : before.endsWith("\n\n") ? "" : before.endsWith("\n") ? "\n" : "\n\n";
+      ta.value = before + lead + stamp + after;
+      const c = (before + lead + stamp).length;
+      ta.focus(); ta.setSelectionRange(c, c);
+      write(); showDot();
     };
-    fab.addEventListener("pointerup", up);
-    fab.addEventListener("pointercancel", up);
-    fab.addEventListener("keydown", e => {
-      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen(panel.hidden); }
-    });
-    window.addEventListener("resize", () => { clamp(); placePanel(); });
+    document.addEventListener("keydown", e => { if (e.key === "Escape" && !panel.hidden) { write(); setOpen(false); } });
     window.dbdNotes = { get: () => ta.value, set: v => { ta.value = v; try { localStorage.setItem(K_NOTES, v); } catch (e) {} showDot(); } };
-    clamp(); fab.hidden = false; showDot();
+    fab.hidden = false; showDot();
   })();
-
-  // ---------- sample month ----------
-  function makeSample() {
-    const y = +todayStr.slice(0, 4), m = +todayStr.slice(5, 7), ym = y + "-" + pad(m);
-    const upto = Math.max(1, +todayStr.slice(8, 10) - 1);
-    const rows = [
-      [1, "Venture", "PGANDE WEB ONLINE", 186.42], [1, "Savor", "SAFEWAY #1712 SONORA CA", 94.18], [2, "Venture", "ARCO #82831 SONORA CA", 52.07],
-      [3, "Amazon", "AMAZON MKTPL*BB3KD71", 23.99], [4, "Savor", "TST* DIANA'S PIZZA SONORA", 41.5], [5, "Venture", "TRACTOR SUPPLY #2204", 68.4],
-      [6, "Venture", "NETFLIX.COM", 15.49], [8, "Savor", "SAVEMART 609 SONORA CA", 77.31], [9, "Savor", "STARBUCKS STORE 10477", 7.85],
-      [10, "Kohl's", "KOHLS #0612 SONORA CA", 62.66], [11, "Venture", "VERIZON WIRELESS PAYMENTS", 142.0], [12, "Venture", "ARCO #82831 SONORA CA", 48.9],
-      [14, "Venture", "SIMPLISAFE 888-957-4675", 9.99], [15, "Savor", "SAFEWAY #1712 SONORA CA", 131.04], [16, "Savor", "SQ *SONORA FARMERS MKT", 26.0],
-      [17, "Amazon", "AMAZON MKTPL*K29XQ0", 38.47], [18, "Savor", "MOTHER LODE FAIR CAFE", 33.2], [19, "Venture", "HOME DEPOT #6618", 54.12],
-      [20, "Amazon", "AMAZON RETURN", -23.99], [21, "Savor", "SAVEMART 609 SONORA CA", 64.88], [22, "Venture", "ARCO #82831 SONORA CA", 55.6],
-      [23, "Venture", "SPOTIFY USA", 11.99], [24, "Venture", "COSTCO WHSE #0483", 203.55]
-    ].filter(r => r[0] <= upto);
-    const tx = rows.map(([d, acct, desc, amt]) => { const nm = cleanName(desc); return { id: uid(), fileId: "sample", acct, date: ym + "-" + pad(d), desc, raw: amt, name: nm, key: keyOf(nm), amount: amt, kind: amt < 0 ? "refund" : "spend", counted: amt > 0 }; });
-    if (upto >= 3) tx.push({ id: uid(), fileId: "sample", acct: "Savor", date: ym + "-03", desc: "CAPITAL ONE AUTOPAY PYMT", raw: -500, name: "Capital One Autopay Pymt", key: "CAPITAL ONE", amount: -500, kind: "payment", counted: false });
-    const nk = n => keyOf(cleanName(n));
-    S.sampleBills = [
-      { key: nk("PGANDE WEB ONLINE"), name: cleanName("PGANDE WEB ONLINE"), amount: 186.42, day: 1 },
-      { key: nk("NETFLIX.COM"), name: cleanName("NETFLIX.COM"), amount: 15.49, day: 6 },
-      { key: nk("SIMPLISAFE 888-957-4675"), name: cleanName("SIMPLISAFE 888-957-4675"), amount: 9.99, day: 14 },
-      { key: nk("SPOTIFY USA"), name: cleanName("SPOTIFY USA"), amount: 11.99, day: 23 },
-      { key: "WATER DISTRICT", name: "Tuolumne Utilities (water)", amount: 78.0, day: 27 },
-      { key: "PROPANE", name: "Propane delivery", amount: 140.0, day: 29 }
-    ];
-    return tx;
-  }
 
   // ---------- boot ----------
   load();
   $("noBills").checked = S.noBills;
-  if (!S.txns.length) { S.sample = true; S.txns = makeSample(); }
+  // remove sample data an older version may have left behind
+  if (S.txns.some(t => t.fileId === "sample")) { S.txns = S.txns.filter(t => t.fileId !== "sample"); save(); }
+  (function storeCheck() { let ok = false; try { localStorage.setItem("dbd.test", "1"); ok = localStorage.getItem("dbd.test") === "1"; localStorage.removeItem("dbd.test"); } catch (e) {} $("storeWarn").hidden = ok; })();
   const counted = S.txns.map(t => t.date).sort();
   S.view = counted.length ? counted[counted.length - 1].slice(0, 7) : todayStr.slice(0, 7);
   render();
