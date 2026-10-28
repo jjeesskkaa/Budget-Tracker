@@ -216,6 +216,7 @@ body.dragging-acct { cursor: grabbing; }
 .clearbox .opt { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--surface); }
 .clearbox .opt > span { flex: 1 1 16em; font-size: 14px; }
 .wrap { padding-bottom: 84px; }
+textarea.howtext { min-height: 260px; font-family: var(--body); font-size: 15px; line-height: 1.5; resize: vertical; }
 @media (prefers-reduced-motion: no-preference) { .cell, .chip, .biglist button { transition: border-color .15s, background-color .15s, color .15s; } }
 </style>
 
@@ -295,7 +296,7 @@ body.dragging-acct { cursor: grabbing; }
       </form>
       <div id="sugs"></div>
       <details class="sub">
-        <summary>Back up or restore your bills, cards, notes and saved months</summary>
+        <summary>Back up or restore your bills, cards, notes, CSV steps and saved months</summary>
         <div class="inner" style="padding:8px 0 0">
           <p class="note" style="margin:0">Your bills, card list, notes and saved months are kept in this browser only. Copy the backup and keep it somewhere safe, like a note on your phone.</p>
           <div class="row"><button class="btn ghost" id="copyBackup">Copy backup</button><span class="note" id="copyMsg"></span></div>
@@ -303,6 +304,15 @@ body.dragging-acct { cursor: grabbing; }
           <div class="row"><button class="btn ghost" id="restoreBtn">Restore</button><span class="note" id="restoreMsg"></span></div>
         </div>
       </details>
+    </div>
+  </details>
+
+  <details class="section" id="howSec">
+    <summary><h3>How to get each CSV</h3><span class="note" id="howNote"></span></summary>
+    <div class="inner">
+      <p class="help" style="margin:0">Your own step-by-step for downloading each statement, so you don't have to figure out each site again. It saves as you type, stays when you clear transactions, and is included in the backup.</p>
+      <textarea id="howText" class="howtext" placeholder="Kohl's (capitalone.com)&#10;1. Sign in, tap the Kohl's card&#10;2. View transactions → Download&#10;3. Pick CSV and the date range&#10;&#10;Lowe's (...)&#10;1. ..."></textarea>
+      <div class="row"><span class="note" id="howSaved"></span></div>
     </div>
   </details>
 </div>
@@ -483,7 +493,13 @@ body.dragging-acct { cursor: grabbing; }
     if (h < 0) { stat.err = "Couldn't find the column names (Date, Description, Amount) in this file."; return stat; }
     const low = rows[h].map(x => x.trim().toLowerCase());
     const find = (...res) => { for (const re of res) { const i = low.findIndex(x => re.test(x)); if (i >= 0) return i; } return -1; };
-    const di = find(/^trans(action)?\.?\s?date/, /^date$/, /date/);
+    // Dates: always use the transaction date. Only use the posted date when a file has no
+    // transaction date column, or when a row's transaction date is blank.
+    const isPost = x => /post/.test(x);
+    const tdi = find(/^trans(action)?\.?\s?date/, /trans\w*\.?\s*date|date.*trans|purchase\s*date|^date$/);
+    const pdi = find(/post(ed|ing)?\.?\s*date/, /^post(ed|ing)?$/);
+    const gdi = low.findIndex(x => x.includes("date") && !isPost(x));
+    const di = tdi >= 0 ? tdi : gdi >= 0 ? gdi : pdi;
     const si = find(/desc/, /payee/, /merchant/, /^name$/, /memo/);
     const ai = find(/^amount$/, /amount/);
     const dbi = find(/debit/, /withdraw/), cri = find(/credit/, /deposit/);
@@ -508,7 +524,7 @@ body.dragging-acct { cursor: grabbing; }
 
     for (let i = h + 1; i < rows.length; i++) {
       const r = rows[i];
-      const date = parseDate(r[di]); const desc = (r[si] || "").trim();
+      const date = parseDate(r[di]) || (pdi >= 0 && pdi !== di ? parseDate(r[pdi]) : null); const desc = (r[si] || "").trim();
       if (!date || !desc) continue;
       let out;
       if (ai >= 0 && !isNaN(parseMoney(r[ai]))) out = -parseMoney(r[ai]);
@@ -750,6 +766,7 @@ body.dragging-acct { cursor: grabbing; }
     Object.assign(S, { txns: [], bills: [], accts: DEFAULT_ACCTS.map(a => Object.assign({}, a)), map: {}, snaps: {}, hidden: [], noBills: false, dismissed: [], files: [], sel: null, report: false, confirmClear: false, view: todayStr.slice(0, 7) });
     $("noBills").checked = false;
     if (window.dbdNotes) { window.dbdNotes.set(""); try { localStorage.removeItem("dbd.notes.v1"); } catch (e) {} }
+    if (window.dbdHow) { window.dbdHow.set(""); try { localStorage.removeItem("dbd.csvhow.v1"); } catch (e) {} }
   }
 
   function renderUpload() {
@@ -969,7 +986,7 @@ body.dragging-acct { cursor: grabbing; }
   drop.addEventListener("drop", e => handleFiles(e.dataTransfer.files));
 
   $("copyBackup").onclick = () => {
-    const txt = JSON.stringify({ bills: S.bills, accts: S.accts, map: S.map, snaps: S.snaps, notBills: S.dismissed, notes: window.dbdNotes ? window.dbdNotes.get() : "" });
+    const txt = JSON.stringify({ bills: S.bills, accts: S.accts, map: S.map, snaps: S.snaps, notBills: S.dismissed, notes: window.dbdNotes ? window.dbdNotes.get() : "", csvHow: window.dbdHow ? window.dbdHow.get() : "" });
     const ta = $("restoreText");
     const done = m => { $("copyMsg").textContent = m; };
     try { navigator.clipboard.writeText(txt).then(() => done("Copied. Paste it somewhere safe."), () => { ta.value = txt; ta.select(); done("Select and copy the text below."); }); }
@@ -979,7 +996,8 @@ body.dragging-acct { cursor: grabbing; }
     try {
       const raw = JSON.parse($("restoreText").value);
       const data = Array.isArray(raw) ? { bills: raw } : raw;
-      if (!data || typeof data !== "object" || (!data.bills && !data.snaps && !data.accts && !data.notes)) throw 0;
+      if (!data || typeof data !== "object" || (!data.bills && !data.snaps && !data.accts && !data.notes && !data.csvHow)) throw 0;
+      if (typeof data.csvHow === "string" && data.csvHow.trim() && window.dbdHow) { const cur = window.dbdHow.get(); if (!cur.includes(data.csvHow.trim())) window.dbdHow.set(cur.trim() ? cur.trim() + "\n\n" + data.csvHow.trim() : data.csvHow.trim()); }
       if (typeof data.notes === "string" && data.notes.trim() && window.dbdNotes) { const cur = window.dbdNotes.get(); if (!cur.includes(data.notes.trim())) window.dbdNotes.set(cur.trim() ? cur.trim() + "\n\n" + data.notes.trim() : data.notes.trim()); }
       const b = Array.isArray(data.bills) ? data.bills.filter(x => x && x.key && x.name && typeof x.amount === "number" && x.day) : [];
       const have = new Set(S.bills.map(x => x.key)); let n = 0, c = 0, m = 0;
@@ -1115,6 +1133,20 @@ body.dragging-acct { cursor: grabbing; }
     document.addEventListener("keydown", e => { if (e.key === "Escape" && !panel.hidden) { write(); setOpen(false); } });
     window.dbdNotes = { get: () => ta.value, set: v => { ta.value = v; try { localStorage.setItem(K_NOTES, v); } catch (e) {} showDot(); } };
     clamp(); fab.hidden = false; showDot();
+  })();
+
+  // ---------- how to get each CSV (notes at the bottom) ----------
+  (function howTo() {
+    const K_HOW = "dbd.csvhow.v1";
+    const ta = $("howText"), saved = $("howSaved"), note = $("howNote");
+    try { ta.value = localStorage.getItem(K_HOW) || ""; } catch (e) {}
+    const label = () => { note.textContent = ta.value.trim() ? "saved steps" : ""; };
+    const write = () => { try { localStorage.setItem(K_HOW, ta.value); saved.textContent = "Saved"; } catch (e) { saved.textContent = "Couldn't save"; } label(); };
+    let t = null;
+    ta.addEventListener("input", () => { clearTimeout(t); saved.textContent = ""; t = setTimeout(write, 300); });
+    ta.addEventListener("blur", () => { clearTimeout(t); write(); });
+    window.dbdHow = { get: () => ta.value, set: v => { ta.value = v; try { localStorage.setItem(K_HOW, v); } catch (e) {} label(); } };
+    label();
   })();
 
   // ---------- boot ----------
